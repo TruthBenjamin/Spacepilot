@@ -1,0 +1,567 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../storage/presentation/providers/storage_scan_provider.dart';
+import '../../domain/models/duplicate_file.dart';
+import '../../domain/models/duplicate_group.dart';
+import '../providers/duplicate_groups_provider.dart';
+
+class DuplicatesPage extends ConsumerStatefulWidget {
+  const DuplicatesPage({super.key});
+
+  @override
+  ConsumerState<DuplicatesPage> createState() => _DuplicatesPageState();
+}
+
+class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
+  final Set<String> _selectedPaths = {};
+  final Set<String> _initializedGroups = {};
+
+  void _initializeSelections(List<DuplicateGroup> groups) {
+    for (final group in groups) {
+      if (_initializedGroups.add(group.sha256Hash)) {
+        _selectedPaths.addAll(group.files.skip(1).map((file) => file.path));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scan = ref.watch(storageScanProvider);
+    final groups = ref.watch(duplicateGroupsProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Duplicate Files')),
+      body: SafeArea(
+        child: groups.when(
+          loading: () => const _LoadingState(),
+          error: (error, _) => _ErrorState(
+            message: 'Duplicate files could not be analyzed.',
+            onRetry: () => ref.invalidate(duplicateGroupsProvider),
+          ),
+          data: (duplicateGroups) {
+            _initializeSelections(duplicateGroups);
+
+            if (scan.value?.hasScanned != true) {
+              return _EmptyState(
+                icon: Icons.copy_all_rounded,
+                title: 'Scan to uncover duplicate files',
+                message:
+                    'SpacePilot compares file contents so matching files can be selected safely.',
+                actionLabel: 'Run storage scan',
+                onAction: () => ref.read(storageScanProvider.notifier).scan(),
+              );
+            }
+
+            if (duplicateGroups.isEmpty) {
+              return const _EmptyState(
+                icon: Icons.verified_rounded,
+                title: 'No duplicate files found',
+                message: 'Your scanned folders are already free of exact copies.',
+              );
+            }
+
+            final fileCount = duplicateGroups.fold<int>(
+              0,
+              (total, group) => total + group.files.length,
+            );
+            final wastedBytes = duplicateGroups.fold<int>(
+              0,
+              (total, group) => total + group.recoverableBytes,
+            );
+            final selectedBytes = duplicateGroups
+                .expand((group) => group.files)
+                .where((file) => _selectedPaths.contains(file.path))
+                .fold<int>(0, (total, file) => total + file.sizeBytes);
+
+            return CustomScrollView(
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                  sliver: SliverList.list(
+                    children: [
+                      _SummaryCard(
+                        groupCount: duplicateGroups.length,
+                        fileCount: fileCount,
+                        wastedBytes: wastedBytes,
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Duplicate groups',
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          Text(
+                            '${_selectedPaths.length} selected',
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      for (var index = 0;
+                          index < duplicateGroups.length;
+                          index++) ...[
+                        _DuplicateGroupCard(
+                          index: index,
+                          group: duplicateGroups[index],
+                          selectedPaths: _selectedPaths,
+                          onFileChanged: (path, selected) {
+                            setState(() {
+                              selected
+                                  ? _selectedPaths.add(path)
+                                  : _selectedPaths.remove(path);
+                            });
+                          },
+                          onGroupChanged: (selected) {
+                            setState(() {
+                              final selectable = duplicateGroups[index]
+                                  .files
+                                  .skip(1)
+                                  .map((file) => file.path);
+                              selected
+                                  ? _selectedPaths.addAll(selectable)
+                                  : _selectedPaths.removeAll(selectable);
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      _SelectionSummary(
+                        count: _selectedPaths.length,
+                        bytes: selectedBytes,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.groupCount,
+    required this.fileCount,
+    required this.wastedBytes,
+  });
+
+  final int groupCount;
+  final int fileCount;
+  final int wastedBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colorScheme.primary, colorScheme.primary.withBlue(210)],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: colorScheme.primary.withValues(alpha: 0.24),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.layers_rounded, color: Colors.white, size: 32),
+          const SizedBox(height: 16),
+          Text(
+            _formatBytes(wastedBytes),
+            style: textTheme.headlineMedium?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            'total storage wasted',
+            style: textTheme.bodyMedium?.copyWith(
+              color: Colors.white.withValues(alpha: 0.76),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryMetric(
+                  value: '$groupCount',
+                  label: groupCount == 1 ? 'group' : 'groups',
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 38,
+                color: Colors.white.withValues(alpha: 0.2),
+              ),
+              Expanded(
+                child: _SummaryMetric(
+                  value: '$fileCount',
+                  label: fileCount == 1 ? 'file' : 'files',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Colors.white.withValues(alpha: 0.72),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DuplicateGroupCard extends StatelessWidget {
+  const _DuplicateGroupCard({
+    required this.index,
+    required this.group,
+    required this.selectedPaths,
+    required this.onFileChanged,
+    required this.onGroupChanged,
+  });
+
+  final int index;
+  final DuplicateGroup group;
+  final Set<String> selectedPaths;
+  final void Function(String path, bool selected) onFileChanged;
+  final ValueChanged<bool> onGroupChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectableFiles = group.files.skip(1).toList(growable: false);
+    final selectedCount = selectableFiles
+        .where((file) => selectedPaths.contains(file.path))
+        .length;
+    final allSelected = selectedCount == selectableFiles.length;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: index == 0,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+          child: const Icon(Icons.file_copy_rounded),
+        ),
+        title: Text(
+          'Group ${index + 1}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: Text(
+          '${group.files.length} files  |  ${_formatBytes(group.recoverableBytes)} wasted',
+        ),
+        trailing: Checkbox(
+          value: selectedCount > 0 && !allSelected ? null : allSelected,
+          tristate: selectedCount > 0 && !allSelected,
+          onChanged: (value) => onGroupChanged(value ?? false),
+        ),
+        children: [
+          for (var index = 0; index < group.files.length; index++)
+            _DuplicateFileTile(
+              file: group.files[index],
+              isOriginal: index == 0,
+              selected: selectedPaths.contains(group.files[index].path),
+              onChanged: (selected) =>
+                  onFileChanged(group.files[index].path, selected),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DuplicateFileTile extends StatelessWidget {
+  const _DuplicateFileTile({
+    required this.file,
+    required this.isOriginal,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final DuplicateFile file;
+  final bool isOriginal;
+  final bool selected;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final directory = _parentDirectory(file.path);
+
+    return Material(
+      color: selected
+          ? colorScheme.primaryContainer.withValues(alpha: 0.38)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: isOriginal ? null : () => onChanged(!selected),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Row(
+            children: [
+              Checkbox(
+                value: selected,
+                onChanged: isOriginal
+                    ? null
+                    : (value) => onChanged(value ?? false),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            file.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        if (isOriginal)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorScheme.tertiaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'KEEP',
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: colorScheme.onTertiaryContainer,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$directory  |  ${_formatBytes(file.sizeBytes)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectionSummary extends StatelessWidget {
+  const _SelectionSummary({required this.count, required this.bytes});
+
+  final int count;
+  final int bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      color: colorScheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                count == 0
+                    ? 'No duplicates selected'
+                    : '$count selected for cleanup',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              _formatBytes(bytes),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Comparing file contents...'),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return _EmptyState(
+      icon: Icons.error_outline_rounded,
+      title: 'Analysis interrupted',
+      message: message,
+      actionLabel: 'Try again',
+      onAction: onRetry,
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 54, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 18),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.radar_rounded),
+                label: Text(actionLabel!),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _parentDirectory(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final lastSeparator = normalized.lastIndexOf('/');
+  if (lastSeparator <= 0) return path;
+  return normalized.substring(0, lastSeparator);
+}
+
+String _formatBytes(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  var value = bytes.toDouble();
+  var unit = 0;
+
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+
+  final decimals = unit == 0 ? 0 : 1;
+  return '${value.toStringAsFixed(decimals)} ${units[unit]}';
+}
