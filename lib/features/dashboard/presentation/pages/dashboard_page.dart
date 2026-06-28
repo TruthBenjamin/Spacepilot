@@ -807,7 +807,6 @@ class _DashboardHeader extends StatelessWidget {
                 'SpacePilot AI',
                 style: textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
-                  letterSpacing: -0.4,
                 ),
               ),
               Text(
@@ -956,7 +955,6 @@ class _StorageGauge extends StatelessWidget {
                 style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: -1.2,
                 ),
               ),
               Text(
@@ -1017,7 +1015,6 @@ class _StorageDetails extends StatelessWidget {
           style: textTheme.headlineSmall?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
           ),
         ),
         const SizedBox(height: 8),
@@ -1118,13 +1115,13 @@ class _MetricCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(17),
+              borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(icon, color: accent, size: 26),
+            child: Icon(icon, color: accent, size: 24),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -1142,7 +1139,6 @@ class _MetricCard extends StatelessWidget {
                   value,
                   style: textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
                   ),
                 ),
                 const SizedBox(height: 2),
