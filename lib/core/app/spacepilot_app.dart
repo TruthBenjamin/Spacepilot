@@ -16,7 +16,7 @@ class SpacePilotApp extends ConsumerWidget {
       title: 'SpacePilot AI',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       routerConfig: router,
     );
   }

@@ -5,30 +5,39 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../features/agent/domain/models/agent_models.dart';
+import '../../../../features/agent/presentation/providers/agent_provider.dart';
+import '../../../../features/auto_clean/domain/models/auto_clean_rules.dart';
+import '../../../../features/auto_clean/presentation/providers/auto_clean_provider.dart';
 import '../../../../features/storage/domain/models/storage_stats.dart';
+import '../../../../features/recommendations/domain/models/storage_recommendation.dart';
+import '../../../../features/recommendations/presentation/providers/recommendations_provider.dart';
+import '../../../../features/scheduled_scans/presentation/providers/scheduled_scan_provider.dart';
 import '../../../../features/storage/data/services/storage_scanner_service.dart';
+import '../../../../features/storage/presentation/providers/device_storage_provider.dart';
 import '../../../../features/storage/presentation/providers/storage_scan_provider.dart';
 import '../../../../routes/app_navigation.dart';
+import '../../../../shared/presentation/widgets/space_background.dart';
 
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({super.key});
-
-  static final StorageStats _mockStats = StorageStats(
-    totalBytes: 128 * 1024 * 1024 * 1024,
-    usedBytes: 92 * 1024 * 1024 * 1024,
-    freeBytes: 36 * 1024 * 1024 * 1024,
-    deviceHealthScore: 92,
-    lastUpdated: DateTime(2026, 6, 19, 9, 41),
-  );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final scanState = ref.watch(storageScanProvider);
+    final storageStats = ref.watch(deviceStorageStatsWithHealthProvider);
+    final recommendations = ref.watch(recommendationsProvider);
+    final scheduledScan = ref.watch(scheduledScanProvider);
+    final autoCleanPlan = ref.watch(autoCleanPlanProvider);
+    final agentReport = ref.watch(agentReportProvider);
+    ref.watch(agentMonitoringProvider);
 
     Future<void> runScan() async {
       try {
         await ref.read(storageScanProvider.notifier).scan();
+        ref.invalidate(deviceStorageStatsProvider);
+        ref.invalidate(deviceStorageStatsWithHealthProvider);
       } catch (error) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -38,19 +47,7 @@ class DashboardPage extends ConsumerWidget {
     }
 
     return Scaffold(
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              colorScheme.primary.withValues(alpha: 0.08),
-              Theme.of(context).scaffoldBackgroundColor,
-              Theme.of(context).scaffoldBackgroundColor,
-            ],
-            stops: const [0, 0.32, 1],
-          ),
-        ),
+      body: SpaceBackground(
         child: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
@@ -62,18 +59,45 @@ class DashboardPage extends ConsumerWidget {
                   children: [
                     const _DashboardHeader(),
                     const SizedBox(height: 28),
-                    _StorageOverview(stats: _mockStats),
+                    storageStats.when(
+                      data: (stats) => _StorageOverview(stats: stats),
+                      error: (error, _) => _StorageStatsUnavailable(
+                        onRetry: () {
+                          ref.invalidate(deviceStorageStatsProvider);
+                          ref.invalidate(deviceStorageStatsWithHealthProvider);
+                        },
+                      ),
+                      loading: () => const _StorageStatsLoading(),
+                    ),
                     const SizedBox(height: 16),
-                    _MetricGrid(stats: _mockStats),
+                    storageStats.when(
+                      data: (stats) => _MetricGrid(stats: stats),
+                      error: (error, _) => const SizedBox.shrink(),
+                      loading: () => const SizedBox.shrink(),
+                    ),
                     const SizedBox(height: 16),
-                    _HealthCard(score: _mockStats.deviceHealthScore),
+                    storageStats.when(
+                      data: (stats) =>
+                          _HealthCard(score: stats.deviceHealthScore),
+                      error: (error, _) => const SizedBox.shrink(),
+                      loading: () => const SizedBox.shrink(),
+                    ),
                     const SizedBox(height: 24),
+                    _AgentAssistantCard(report: agentReport),
+                    const SizedBox(height: 16),
                     _ScanButton(
                       isLoading: scanState.isLoading,
                       onPressed: runScan,
                     ),
                     const SizedBox(height: 16),
                     _ScanResultsSummary(scanState: scanState),
+                    const SizedBox(height: 16),
+                    _RecommendationsSection(recommendations: recommendations),
+                    const SizedBox(height: 16),
+                    _AutomationSummary(
+                      nextScan: scheduledScan.nextRunAfter(DateTime.now()),
+                      autoCleanPlan: autoCleanPlan,
+                    ),
                     const SizedBox(height: 14),
                     Text(
                       'Your files stay private and are analyzed on this device.',
@@ -89,6 +113,456 @@ class DashboardPage extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AgentAssistantCard extends StatelessWidget {
+  const _AgentAssistantCard({required this.report});
+
+  final AsyncValue<AgentReport> report;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      color: colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: report.when(
+          data: (data) {
+            final topSuggestion = data.cleanupSuggestions.isEmpty
+                ? null
+                : data.cleanupSuggestions.first;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.smart_toy_rounded,
+                      color: colorScheme.onPrimaryContainer,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Local storage assistant',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: colorScheme.onPrimaryContainer,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                    ),
+                    const _LocalOnlyBadge(),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  _agentStatus(data),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                if (topSuggestion != null) ...[
+                  const SizedBox(height: 12),
+                  _AgentSuggestionRow(suggestion: topSuggestion),
+                ],
+              ],
+            );
+          },
+          error: (error, _) => Text(
+            'Run a storage scan to let the local assistant build a report.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onPrimaryContainer,
+            ),
+          ),
+          loading: () => Row(
+            children: [
+              SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.3,
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Preparing local storage report...',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalOnlyBadge extends StatelessWidget {
+  const _LocalOnlyBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          'Local only',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: colorScheme.onPrimaryContainer,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AgentSuggestionRow extends StatelessWidget {
+  const _AgentSuggestionRow({required this.suggestion});
+
+  final AgentCleanupSuggestion suggestion;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.auto_fix_high_rounded, color: colorScheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  suggestion.title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  '${suggestion.reason} | ${_formatBytes(suggestion.estimatedSavingsBytes)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onPrimaryContainer.withValues(
+                      alpha: 0.74,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AutomationSummary extends StatelessWidget {
+  const _AutomationSummary({
+    required this.nextScan,
+    required this.autoCleanPlan,
+  });
+
+  final DateTime? nextScan;
+  final AsyncValue<AutoCleanPlan> autoCleanPlan;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 620;
+        final scheduled = _AutomationCard(
+          icon: Icons.event_repeat_rounded,
+          title: 'Scheduled scans',
+          value: nextScan == null ? 'Off' : _formatShortDateTime(nextScan!),
+          actionLabel: 'Configure',
+          onPressed: context.pushSettings,
+        );
+        final rules = autoCleanPlan.when(
+          data: (plan) => _AutomationCard(
+            icon: Icons.rule_rounded,
+            title: 'Auto-clean rules',
+            value: '${plan.ruleCount} active | ${_formatBytes(plan.estimatedSavingsBytes)}',
+            actionLabel: 'Review',
+            onPressed: context.pushSettings,
+          ),
+          error: (error, _) => _AutomationCard(
+            icon: Icons.rule_rounded,
+            title: 'Auto-clean rules',
+            value: 'Needs scan',
+            actionLabel: 'Review',
+            onPressed: context.pushSettings,
+          ),
+          loading: () => _AutomationCard(
+            icon: Icons.rule_rounded,
+            title: 'Auto-clean rules',
+            value: 'Checking...',
+            actionLabel: 'Review',
+            onPressed: context.pushSettings,
+          ),
+        );
+
+        if (compact) {
+          return Column(
+            children: [
+              scheduled,
+              const SizedBox(height: 10),
+              rules,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: scheduled),
+            const SizedBox(width: 12),
+            Expanded(child: rules),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AutomationCard extends StatelessWidget {
+  const _AutomationCard({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.actionLabel,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String value;
+  final String actionLabel;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(icon, color: colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(onPressed: onPressed, child: Text(actionLabel)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationsSection extends StatelessWidget {
+  const _RecommendationsSection({required this.recommendations});
+
+  final AsyncValue<List<StorageRecommendation>> recommendations;
+
+  @override
+  Widget build(BuildContext context) {
+    return recommendations.when(
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Recommendations',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${items.length} found',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            for (final item in items) ...[
+              _RecommendationCard(recommendation: item),
+              const SizedBox(height: 10),
+            ],
+          ],
+        );
+      },
+      error: (error, _) => const SizedBox.shrink(),
+      loading: () => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2.4),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Finding recommendations...',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationCard extends StatelessWidget {
+  const _RecommendationCard({required this.recommendation});
+
+  final StorageRecommendation recommendation;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 430;
+            final leading = Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(
+                _recommendationIcon(recommendation.type),
+                color: colorScheme.onPrimaryContainer,
+              ),
+            );
+            final details = Expanded(
+              child: _RecommendationDetails(recommendation: recommendation),
+            );
+            final action = FilledButton.tonal(
+              onPressed: () => _openRecommendation(context, recommendation),
+              child: Text(recommendation.actionLabel),
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      leading,
+                      const SizedBox(width: 14),
+                      details,
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  action,
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                leading,
+                const SizedBox(width: 14),
+                details,
+                const SizedBox(width: 12),
+                action,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationDetails extends StatelessWidget {
+  const _RecommendationDetails({required this.recommendation});
+
+  final StorageRecommendation recommendation;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          recommendation.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${_formatBytes(recommendation.storageSavingsBytes)} savings',
+          style: textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -368,13 +842,13 @@ class _StorageOverview extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF12244F), Color(0xFF294EC3), Color(0xFF7147E8)],
+          colors: [Color(0xFF121735), Color(0xFF22104F), Color(0xFF7C3AED)],
           stops: [0, 0.58, 1],
         ),
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
           BoxShadow(
-            color: AppColors.brand.withValues(alpha: 0.2),
+            color: const Color(0xFF7C3AED).withValues(alpha: 0.34),
             blurRadius: 32,
             offset: const Offset(0, 16),
           ),
@@ -400,6 +874,59 @@ class _StorageOverview extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _StorageStatsLoading extends StatelessWidget {
+  const _StorageStatsLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Row(
+          children: [
+            SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.4),
+            ),
+            SizedBox(width: 14),
+            Expanded(child: Text('Reading device storage...')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StorageStatsUnavailable extends StatelessWidget {
+  const _StorageStatsUnavailable({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Icon(Icons.storage_rounded, color: colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Device storage stats are unavailable. Try refreshing.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
       ),
     );
   }
@@ -499,6 +1026,13 @@ class _StorageDetails extends StatelessWidget {
           style: textTheme.bodyMedium?.copyWith(
             color: Colors.white.withValues(alpha: 0.72),
             height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Updated ${_formatShortDateTime(stats.lastUpdated)}',
+          style: textTheme.bodySmall?.copyWith(
+            color: Colors.white.withValues(alpha: 0.58),
           ),
         ),
       ],
@@ -724,7 +1258,7 @@ class _ScanButton extends StatelessWidget {
         onPressed: isLoading ? null : onPressed,
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(60),
-          backgroundColor: AppColors.brand,
+          backgroundColor: const Color(0xFF7C3AED),
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -760,9 +1294,51 @@ class _ScanButton extends StatelessWidget {
 
 String _scanErrorMessage(Object error) {
   if (error is PlatformException && error.code == 'PERMISSION_DENIED') {
-    return 'Storage access is required to scan your files.';
+    return 'Storage and media access are required to scan your files.';
   }
   return 'The storage scan could not be completed. Please try again.';
+}
+
+void _openRecommendation(
+  BuildContext context,
+  StorageRecommendation recommendation,
+) {
+  switch (recommendation.actionTarget) {
+    case RecommendationActionTarget.duplicates:
+      context.pushDuplicates();
+      return;
+    case RecommendationActionTarget.scanResults:
+      context.pushScanResults();
+      return;
+  }
+}
+
+IconData _recommendationIcon(StorageRecommendationType type) {
+  return switch (type) {
+    StorageRecommendationType.oldScreenshots => Icons.photo_library_rounded,
+    StorageRecommendationType.unusedFiles => Icons.history_rounded,
+    StorageRecommendationType.duplicateFiles => Icons.file_copy_rounded,
+    StorageRecommendationType.apkInstallers => Icons.android_rounded,
+  };
+}
+
+String _agentStatus(AgentReport report) {
+  final trend = report.growthTrend;
+  final prediction = report.shortagePrediction;
+
+  if (prediction.willRunShort && prediction.daysUntilShortage != null) {
+    return 'Storage may run low in ${prediction.daysUntilShortage} days at the current local growth rate.';
+  }
+
+  if (trend.isGrowing) {
+    return 'Storage is growing by about ${_formatBytes(trend.bytesPerDay.round())} per day.';
+  }
+
+  if (trend.sampleCount < 2) {
+    return 'Background monitoring is collecting local snapshots for trend detection.';
+  }
+
+  return 'Storage growth looks stable from local background monitoring.';
 }
 
 String _formatBytes(int bytes) {
@@ -775,6 +1351,13 @@ String _formatBytes(int bytes) {
   }
   final decimals = unit == 0 ? 0 : 1;
   return '${value.toStringAsFixed(decimals)} ${units[unit]}';
+}
+
+String _formatShortDateTime(DateTime value) {
+  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  final minute = value.minute.toString().padLeft(2, '0');
+  final period = value.hour >= 12 ? 'PM' : 'AM';
+  return '${value.month}/${value.day}, $hour:$minute $period';
 }
 
 class _GaugePainter extends CustomPainter {

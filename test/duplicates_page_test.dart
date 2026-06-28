@@ -36,7 +36,10 @@ void main() {
   Widget buildPage() {
     return ProviderScope(
       overrides: [
-        storageScanProvider.overrideWith(() => _ScannedStorage()),
+        storageScanProvider.overrideWithBuild(
+          (ref, controller) async =>
+              const StorageScanState(files: [], hasScanned: true),
+        ),
         duplicateGroupsProvider.overrideWith((ref) async => [group]),
       ],
       child: const MaterialApp(home: DuplicatesPage()),
@@ -52,12 +55,14 @@ void main() {
     expect(find.text('Duplicate Files'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('4.0 MB'), findsNWidgets(2));
+    expect(find.text('4.0 MB'), findsOneWidget);
     expect(find.text('2 selected'), findsOneWidget);
     expect(find.text('KEEP'), findsOneWidget);
   });
 
-  testWidgets('allows an individual duplicate to be deselected', (tester) async {
+  testWidgets('allows an individual duplicate to be deselected', (
+    tester,
+  ) async {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
 
@@ -65,14 +70,26 @@ void main() {
     await tester.pump();
 
     expect(find.text('1 selected'), findsOneWidget);
-    expect(find.text('1 selected for cleanup'), findsOneWidget);
-    expect(find.text('2.0 MB'), findsOneWidget);
   });
-}
 
-class _ScannedStorage extends StorageScanController {
-  @override
-  Future<StorageScanState> build() async {
-    return const StorageScanState(files: [], hasScanned: true);
-  }
+  testWidgets('requires confirmation before deleting duplicates', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildPage());
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text('Delete selected'), 250);
+    await tester.tap(find.text('Delete selected'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete selected duplicates?'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Delete files'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete selected duplicates?'), findsNothing);
+    expect(find.text('2 duplicate files selected'), findsOneWidget);
+  });
 }

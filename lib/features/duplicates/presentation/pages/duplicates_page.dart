@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../cleanup/data/services/cleanup_service.dart';
+import '../../../cleanup/presentation/providers/cleanup_service_provider.dart';
+import '../../../../shared/presentation/widgets/space_background.dart';
+import '../../../storage/presentation/providers/device_storage_provider.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
 import '../../domain/models/duplicate_file.dart';
 import '../../domain/models/duplicate_group.dart';
@@ -16,6 +20,7 @@ class DuplicatesPage extends ConsumerStatefulWidget {
 class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
   final Set<String> _selectedPaths = {};
   final Set<String> _initializedGroups = {};
+  bool _isDeleting = false;
 
   void _initializeSelections(List<DuplicateGroup> groups) {
     for (final group in groups) {
@@ -25,6 +30,43 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
     }
   }
 
+  Future<void> _confirmAndDeleteDuplicates(
+    List<DuplicateGroup> groups,
+    int selectedBytes,
+  ) async {
+    if (_selectedPaths.isEmpty || _isDeleting) return;
+
+    final approved = await _showDeleteConfirmation(
+      context,
+      title: 'Delete selected duplicates?',
+      fileCount: _selectedPaths.length,
+      bytes: selectedBytes,
+    );
+    if (approved != true || !mounted) return;
+
+    setState(() => _isDeleting = true);
+    final result = await ref
+        .read(cleanupServiceProvider)
+        .deleteDuplicates(groups, selectedPaths: Set<String>.of(_selectedPaths));
+    if (!mounted) return;
+
+    ref
+        .read(storageScanProvider.notifier)
+        .removeDeletedPaths(result.deletedPaths);
+    ref.invalidate(deviceStorageStatsProvider);
+    ref.invalidate(deviceStorageStatsWithHealthProvider);
+    setState(() {
+      _isDeleting = false;
+      _selectedPaths.removeAll(result.deletedPaths);
+      _initializedGroups.clear();
+    });
+    ref.invalidate(duplicateGroupsProvider);
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_cleanupMessage(result))));
+  }
+
   @override
   Widget build(BuildContext context) {
     final scan = ref.watch(storageScanProvider);
@@ -32,8 +74,9 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Duplicate Files')),
-      body: SafeArea(
-        child: groups.when(
+      body: SpaceBackground(
+        child: SafeArea(
+          child: groups.when(
           loading: () => const _LoadingState(),
           error: (error, _) => _ErrorState(
             message: 'Duplicate files could not be analyzed.',
@@ -57,7 +100,8 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
               return const _EmptyState(
                 icon: Icons.verified_rounded,
                 title: 'No duplicate files found',
-                message: 'Your scanned folders are already free of exact copies.',
+                message:
+                    'Your scanned folders are already free of exact copies.',
               );
             }
 
@@ -106,9 +150,11 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      for (var index = 0;
-                          index < duplicateGroups.length;
-                          index++) ...[
+                      for (
+                        var index = 0;
+                        index < duplicateGroups.length;
+                        index++
+                      ) ...[
                         _DuplicateGroupCard(
                           index: index,
                           group: duplicateGroups[index],
@@ -122,8 +168,7 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
                           },
                           onGroupChanged: (selected) {
                             setState(() {
-                              final selectable = duplicateGroups[index]
-                                  .files
+                              final selectable = duplicateGroups[index].files
                                   .skip(1)
                                   .map((file) => file.path);
                               selected
@@ -137,6 +182,11 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
                       _SelectionSummary(
                         count: _selectedPaths.length,
                         bytes: selectedBytes,
+                        isDeleting: _isDeleting,
+                        onDelete: () => _confirmAndDeleteDuplicates(
+                          duplicateGroups,
+                          selectedBytes,
+                        ),
                       ),
                     ],
                   ),
@@ -144,6 +194,7 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
               ],
             );
           },
+          ),
         ),
       ),
     );
@@ -413,10 +464,17 @@ class _DuplicateFileTile extends StatelessWidget {
 }
 
 class _SelectionSummary extends StatelessWidget {
-  const _SelectionSummary({required this.count, required this.bytes});
+  const _SelectionSummary({
+    required this.count,
+    required this.bytes,
+    required this.isDeleting,
+    required this.onDelete,
+  });
 
   final int count;
   final int bytes;
+  final bool isDeleting;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -426,25 +484,50 @@ class _SelectionSummary extends StatelessWidget {
       color: colorScheme.secondaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           children: [
-            Icon(Icons.check_circle_rounded, color: colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                count == 0
-                    ? 'No duplicates selected'
-                    : '$count selected for cleanup',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+            Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    count == 0
+                        ? 'No duplicates selected'
+                        : '$count duplicate ${count == 1 ? 'file' : 'files'} selected',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
-              ),
+                Text(
+                  _formatBytes(bytes),
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
             ),
-            Text(
-              _formatBytes(bytes),
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: colorScheme.primary,
-                fontWeight: FontWeight.w900,
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: count == 0 || isDeleting ? null : onDelete,
+                style: FilledButton.styleFrom(
+                  backgroundColor: colorScheme.error,
+                  foregroundColor: colorScheme.onError,
+                ),
+                icon: isDeleting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.delete_outline_rounded),
+                label: Text(isDeleting ? 'Deleting...' : 'Delete selected'),
               ),
             ),
           ],
@@ -518,9 +601,9 @@ class _EmptyState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
             Text(
@@ -550,6 +633,52 @@ String _parentDirectory(String path) {
   final lastSeparator = normalized.lastIndexOf('/');
   if (lastSeparator <= 0) return path;
   return normalized.substring(0, lastSeparator);
+}
+
+Future<bool?> _showDeleteConfirmation(
+  BuildContext context, {
+  required String title,
+  required int fileCount,
+  required int bytes,
+}) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: Icon(
+        Icons.delete_forever_rounded,
+        color: Theme.of(context).colorScheme.error,
+      ),
+      title: Text(title),
+      content: Text(
+        'This will permanently delete $fileCount '
+        '${fileCount == 1 ? 'file' : 'files'} and free '
+        '${_formatBytes(bytes)}. This cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(true),
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+            foregroundColor: Theme.of(context).colorScheme.onError,
+          ),
+          icon: const Icon(Icons.delete_outline_rounded),
+          label: const Text('Delete files'),
+        ),
+      ],
+    ),
+  );
+}
+
+String _cleanupMessage(CleanupResult result) {
+  if (result.hasFailures) {
+    return '${result.deletedCount} deleted; ${result.failures.length} could not be deleted.';
+  }
+
+  return '${result.deletedCount} ${result.deletedCount == 1 ? 'file' : 'files'} deleted.';
 }
 
 String _formatBytes(int bytes) {

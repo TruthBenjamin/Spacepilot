@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import '../../../storage/data/services/storage_scanner_service.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';

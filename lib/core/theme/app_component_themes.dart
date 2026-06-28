@@ -17,12 +17,14 @@ abstract final class AppComponentThemes {
   static CardThemeData card(ColorScheme colorScheme) {
     return CardThemeData(
       elevation: 0,
-      color: colorScheme.surface,
+      color: colorScheme.surface.withValues(alpha: 0.92),
       surfaceTintColor: Colors.transparent,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: colorScheme.outlineVariant),
-        borderRadius: AppRadii.standard.card,
+        side: BorderSide(
+          color: const Color(0xFF7C3AED).withValues(alpha: 0.18),
+        ),
+        borderRadius: BorderRadius.circular(18),
       ),
     );
   }
