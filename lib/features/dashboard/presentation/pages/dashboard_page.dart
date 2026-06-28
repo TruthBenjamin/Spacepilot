@@ -40,9 +40,9 @@ class DashboardPage extends ConsumerWidget {
         ref.invalidate(deviceStorageStatsWithHealthProvider);
       } catch (error) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_scanErrorMessage(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_scanErrorMessage(error))));
       }
     }
 
@@ -71,14 +71,7 @@ class DashboardPage extends ConsumerWidget {
                     ),
                     const SizedBox(height: 16),
                     storageStats.when(
-                      data: (stats) => _MetricGrid(stats: stats),
-                      error: (error, _) => const SizedBox.shrink(),
-                      loading: () => const SizedBox.shrink(),
-                    ),
-                    const SizedBox(height: 16),
-                    storageStats.when(
-                      data: (stats) =>
-                          _HealthCard(score: stats.deviceHealthScore),
+                      data: (stats) => _StatsGrid(stats: stats),
                       error: (error, _) => const SizedBox.shrink(),
                       loading: () => const SizedBox.shrink(),
                     ),
@@ -302,7 +295,8 @@ class _AutomationSummary extends StatelessWidget {
           data: (plan) => _AutomationCard(
             icon: Icons.rule_rounded,
             title: 'Auto-clean rules',
-            value: '${plan.ruleCount} active | ${_formatBytes(plan.estimatedSavingsBytes)}',
+            value:
+                '${plan.ruleCount} active | ${_formatBytes(plan.estimatedSavingsBytes)}',
             actionLabel: 'Review',
             onPressed: context.pushSettings,
           ),
@@ -324,11 +318,7 @@ class _AutomationSummary extends StatelessWidget {
 
         if (compact) {
           return Column(
-            children: [
-              scheduled,
-              const SizedBox(height: 10),
-              rules,
-            ],
+            children: [scheduled, const SizedBox(height: 10), rules],
           );
         }
 
@@ -504,13 +494,7 @@ class _RecommendationCard extends StatelessWidget {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      leading,
-                      const SizedBox(width: 14),
-                      details,
-                    ],
-                  ),
+                  Row(children: [leading, const SizedBox(width: 14), details]),
                   const SizedBox(height: 12),
                   action,
                 ],
@@ -550,9 +534,7 @@ class _RecommendationDetails extends StatelessWidget {
           recommendation.title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w800,
-          ),
+          style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 4),
         Text(
@@ -668,7 +650,10 @@ class _ScanResultsSummary extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.error_outline_rounded, color: colorScheme.onErrorContainer),
+            Icon(
+              Icons.error_outline_rounded,
+              color: colorScheme.onErrorContainer,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -775,8 +760,8 @@ class _DashboardHeader extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 48,
-          height: 48,
+          width: 56,
+          height: 56,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
@@ -805,12 +790,16 @@ class _DashboardHeader extends StatelessWidget {
             children: [
               Text(
                 'SpacePilot AI',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
               ),
               Text(
                 'Your device is looking great',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -1037,8 +1026,8 @@ class _StorageDetails extends StatelessWidget {
   }
 }
 
-class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({required this.stats});
+class _StatsGrid extends StatelessWidget {
+  const _StatsGrid({required this.stats});
 
   final StorageStats stats;
 
@@ -1046,31 +1035,37 @@ class _MetricGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 520;
-        final used = _MetricCard(
-          label: 'Storage Used',
-          value: '${stats.usedGigabytes.toStringAsFixed(0)} GB',
-          caption: '${(stats.usedPercent * 100).round()}% of capacity',
-          icon: Icons.pie_chart_rounded,
-          accent: AppColors.brand,
-        );
-        final free = _MetricCard(
-          label: 'Storage Free',
-          value: '${stats.freeGigabytes.toStringAsFixed(0)} GB',
-          caption: 'Ready when you need it',
-          icon: Icons.cloud_done_rounded,
-          accent: AppColors.success,
-        );
+        const spacing = 16.0;
+        final columns = constraints.maxWidth >= 780
+            ? 3
+            : constraints.maxWidth >= 620
+            ? 2
+            : 1;
+        final itemWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+        final cards = [
+          _MetricCard(
+            label: 'Storage Used',
+            value: '${stats.usedGigabytes.toStringAsFixed(0)} GB',
+            caption: '${(stats.usedPercent * 100).round()}% of capacity',
+            icon: Icons.pie_chart_rounded,
+            accent: AppColors.brand,
+          ),
+          _MetricCard(
+            label: 'Storage Free',
+            value: '${stats.freeGigabytes.toStringAsFixed(0)} GB',
+            caption: 'Ready when you need it',
+            icon: Icons.cloud_done_rounded,
+            accent: AppColors.success,
+          ),
+          _HealthCard(score: stats.deviceHealthScore),
+        ];
 
-        if (compact) {
-          return Column(children: [used, const SizedBox(height: 12), free]);
-        }
-
-        return Row(
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
           children: [
-            Expanded(child: used),
-            const SizedBox(width: 16),
-            Expanded(child: free),
+            for (final card in cards) SizedBox(width: itemWidth, child: card),
           ],
         );
       },
@@ -1166,6 +1161,7 @@ class _HealthCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final status = dashboardHealthStatusForScore(score);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1180,14 +1176,14 @@ class _HealthCard extends StatelessWidget {
             width: 62,
             height: 62,
             decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.12),
+              color: status.color.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
             child: Text(
               '$score',
               style: textTheme.titleLarge?.copyWith(
-                color: AppColors.success,
+                color: status.color,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -1205,7 +1201,9 @@ class _HealthCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  'Excellent condition. Your storage is running smoothly.',
+                  status.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -1217,18 +1215,64 @@ class _HealthCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.1),
+              color: status.color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
-              'Excellent',
-              style: textTheme.labelSmall?.copyWith(color: AppColors.success),
+              status.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.labelSmall?.copyWith(color: status.color),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class DashboardHealthStatus {
+  const DashboardHealthStatus({
+    required this.label,
+    required this.message,
+    required this.color,
+  });
+
+  final String label;
+  final String message;
+  final Color color;
+}
+
+DashboardHealthStatus dashboardHealthStatusForScore(int score) {
+  if (score >= 85) {
+    return const DashboardHealthStatus(
+      label: 'Excellent',
+      message: 'Excellent condition. Your storage is running smoothly.',
+      color: AppColors.success,
+    );
+  }
+
+  if (score >= 70) {
+    return const DashboardHealthStatus(
+      label: 'Good',
+      message: 'Good condition. A quick cleanup can keep things smooth.',
+      color: AppColors.success,
+    );
+  }
+
+  if (score >= 50) {
+    return const DashboardHealthStatus(
+      label: 'Fair',
+      message: 'Storage is getting tight. Review recommendations soon.',
+      color: AppColors.warning,
+    );
+  }
+
+  return const DashboardHealthStatus(
+    label: 'Poor',
+    message: 'Storage is under pressure. Run cleanup recommendations.',
+    color: AppColors.danger,
+  );
 }
 
 class _ScanButton extends StatelessWidget {
