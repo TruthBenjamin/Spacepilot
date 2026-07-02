@@ -15,11 +15,98 @@ void main() {
       '${root.path}/untouched.txt',
     ).writeAsString('y');
 
-    final result = await service.deleteFiles([selected]);
+    final result = await service.deleteFiles([selected], userConfirmed: true);
 
     expect(result.deletedCount, 1);
     expect(await selected.exists(), isFalse);
     expect(await untouched.exists(), isTrue);
+  });
+
+  test('deleteFiles rejects files outside configured cleanup roots', () async {
+    final allowedRoot = await Directory.systemTemp.createTemp(
+      'cleanup_allowed_',
+    );
+    final outsideRoot = await Directory.systemTemp.createTemp(
+      'cleanup_outside_',
+    );
+    addTearDown(() => allowedRoot.delete(recursive: true));
+    addTearDown(() => outsideRoot.delete(recursive: true));
+
+    final allowed = await File(
+      '${allowedRoot.path}/allowed.txt',
+    ).writeAsString('safe');
+    final outside = await File(
+      '${outsideRoot.path}/outside.txt',
+    ).writeAsString('unsafe');
+    final guardedService = CleanupService(
+      allowedRootPaths: [allowedRoot.absolute.path],
+    );
+
+    final result = await guardedService.deleteFiles(
+      [allowed, outside],
+      userConfirmed: true,
+    );
+
+    expect(result.deletedPaths, contains(allowed.absolute.path));
+    expect(
+      result.failures,
+      containsPair(
+        outside.absolute.path,
+        'Path is outside allowed cleanup folders.',
+      ),
+    );
+    expect(await allowed.exists(), isFalse);
+    expect(await outside.exists(), isTrue);
+  });
+
+  test('deleteFiles refuses to delete without explicit confirmation', () async {
+    final root = await Directory.systemTemp.createTemp('cleanup_confirm_');
+    addTearDown(() => root.delete(recursive: true));
+    final selected = await File('${root.path}/selected.txt').writeAsString('x');
+
+    final result = await service.deleteFiles(
+      [selected],
+      userConfirmed: false,
+    );
+
+    expect(result.deletedCount, 0);
+    expect(
+      result.failures,
+      containsPair(
+        selected.absolute.path,
+        'Deletion requires explicit user confirmation.',
+      ),
+    );
+    expect(await selected.exists(), isTrue);
+  });
+
+  test('deleteFiles refuses protected Android application folders', () async {
+    final root = await Directory.systemTemp.createTemp('cleanup_protected_');
+    addTearDown(() => root.delete(recursive: true));
+    final protectedDirectory = await Directory(
+      '${root.path}/Android/data/ai.spacepilot.app',
+    ).create(recursive: true);
+    final protectedFile = await File(
+      '${protectedDirectory.path}/critical.db',
+    ).writeAsString('critical');
+    final guardedService = CleanupService(
+      allowedRootPaths: [root.absolute.path],
+    );
+
+    final result = await guardedService.deleteFiles(
+      [protectedFile],
+      userConfirmed: true,
+    );
+
+    expect(result.deletedCount, 0);
+    expect(
+      result.failures,
+      containsPair(
+        protectedFile.absolute.path,
+        'Path is protected and cannot be deleted.',
+      ),
+    );
+    expect(await protectedFile.exists(), isTrue);
   });
 
   test('deleteDuplicates always keeps the first file in a group', () async {
@@ -38,6 +125,7 @@ void main() {
     final result = await service.deleteDuplicates(
       [group],
       selectedPaths: {original.path, copy.path},
+      userConfirmed: true,
     );
 
     expect(result.deletedCount, 1);
@@ -52,12 +140,57 @@ void main() {
     final nonEmpty = await Directory('${root.path}/non-empty').create();
     await File('${nonEmpty.path}/file.txt').writeAsString('content');
 
-    final result = await service.deleteEmptyFolders([empty, nonEmpty]);
+    final result = await service.deleteEmptyFolders(
+      [empty, nonEmpty],
+      userConfirmed: true,
+    );
 
     expect(result.deletedPaths, contains(empty.absolute.path));
     expect(result.skippedPaths, contains(nonEmpty.absolute.path));
     expect(await empty.exists(), isFalse);
     expect(await nonEmpty.exists(), isTrue);
+  });
+
+  test('deleteEmptyFolders refuses cleanup roots', () async {
+    final root = await Directory.systemTemp.createTemp('cleanup_root_');
+    addTearDown(() async {
+      if (await root.exists()) {
+        await root.delete(recursive: true);
+      }
+    });
+    final guardedService = CleanupService(
+      allowedRootPaths: [root.absolute.path],
+    );
+
+    final result = await guardedService.deleteEmptyFolders(
+      [root],
+      userConfirmed: true,
+    );
+
+    expect(result.deletedCount, 0);
+    expect(
+      result.failures,
+      containsPair(
+        root.absolute.path,
+        'Path is protected and cannot be deleted.',
+      ),
+    );
+    expect(await root.exists(), isTrue);
+  });
+
+  test('deleteFiles skips missing files without failing the cleanup', () async {
+    final root = await Directory.systemTemp.createTemp('cleanup_missing_');
+    addTearDown(() => root.delete(recursive: true));
+    final missing = File('${root.path}/missing.txt');
+
+    final result = await service.deleteFiles(
+      [missing],
+      userConfirmed: true,
+    );
+
+    expect(result.deletedCount, 0);
+    expect(result.skippedPaths, contains(missing.absolute.path));
+    expect(result.failures, isEmpty);
   });
 }
 

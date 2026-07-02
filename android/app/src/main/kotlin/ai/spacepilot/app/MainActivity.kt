@@ -16,6 +16,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.nio.file.Files
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 
@@ -187,21 +188,7 @@ class MainActivity : FlutterActivity() {
         }
         if (!startPermissionRequest(result, PermissionKind.MEDIA)) return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(
-                arrayOf(
-                    Manifest.permission.READ_MEDIA_IMAGES,
-                    Manifest.permission.READ_MEDIA_VIDEO,
-                    Manifest.permission.READ_MEDIA_AUDIO,
-                ),
-                MEDIA_PERMISSION_REQUEST,
-            )
-        } else {
-            requestPermissions(
-                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
-                MEDIA_PERMISSION_REQUEST,
-            )
-        }
+        requestPermissions(mediaReadPermissions(), MEDIA_PERMISSION_REQUEST)
     }
 
     private fun startPermissionRequest(
@@ -222,25 +209,37 @@ class MainActivity : FlutterActivity() {
         val files = mutableListOf<Map<String, Any>>()
         SCANNED_FOLDERS.forEach { directoryType ->
             val root = Environment.getExternalStoragePublicDirectory(directoryType)
+            val canonicalRoot = root.canonicalFile
             val pending = ArrayDeque<File>().apply { add(root) }
 
             while (pending.isNotEmpty()) {
                 val current = pending.removeLast()
                 current.listFiles()?.forEach { entry ->
-                    if (entry.isDirectory) {
-                        pending.add(entry)
-                    } else if (entry.isFile) {
+                    if (Files.isSymbolicLink(entry.toPath())) return@forEach
+
+                    val canonicalEntry = runCatching { entry.canonicalFile }.getOrNull()
+                        ?: return@forEach
+                    if (!isInside(canonicalEntry, canonicalRoot)) return@forEach
+
+                    if (canonicalEntry.isDirectory) {
+                        pending.add(canonicalEntry)
+                    } else if (canonicalEntry.isFile) {
                         files += mapOf(
-                            "filename" to entry.name,
-                            "path" to entry.absolutePath,
-                            "size" to entry.length(),
-                            "lastModified" to entry.lastModified(),
+                            "filename" to canonicalEntry.name,
+                            "path" to canonicalEntry.absolutePath,
+                            "size" to canonicalEntry.length(),
+                            "lastModified" to canonicalEntry.lastModified(),
                         )
                     }
                 }
             }
         }
         return files
+    }
+
+    private fun isInside(entry: File, root: File): Boolean {
+        val rootPath = root.path.trimEnd(File.separatorChar)
+        return entry.path == rootPath || entry.path.startsWith("$rootPath${File.separator}")
     }
 
     private fun hasStoragePermission(): Boolean {
@@ -255,19 +254,47 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun hasMediaPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            listOf(
+        if (hasStoragePermission()) return true
+
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
+                val hasFullVisualAccess = hasPermission(Manifest.permission.READ_MEDIA_IMAGES) &&
+                    hasPermission(Manifest.permission.READ_MEDIA_VIDEO)
+                val hasSelectedVisualAccess = hasPermission(
+                    Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+                )
+                val hasAudioAccess = hasPermission(Manifest.permission.READ_MEDIA_AUDIO)
+
+                (hasFullVisualAccess || hasSelectedVisualAccess) && hasAudioAccess
+            }
+            else -> mediaReadPermissions().all(::hasPermission)
+        }
+    }
+
+    private fun hasPermission(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            permission,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun mediaReadPermissions(): Array<String> {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> arrayOf(
                 Manifest.permission.READ_MEDIA_IMAGES,
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO,
-            ).all { permission ->
-                ContextCompat.checkSelfPermission(
-                    this,
-                    permission,
-                ) == PackageManager.PERMISSION_GRANTED
-            }
-        } else {
-            hasStoragePermission()
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+            )
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO,
+            )
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+            )
+            else -> emptyArray()
         }
     }
 

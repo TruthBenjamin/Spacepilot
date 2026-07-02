@@ -13,7 +13,7 @@ import '../../../../features/storage/domain/models/storage_stats.dart';
 import '../../../../features/recommendations/domain/models/storage_recommendation.dart';
 import '../../../../features/recommendations/presentation/providers/recommendations_provider.dart';
 import '../../../../features/scheduled_scans/presentation/providers/scheduled_scan_provider.dart';
-import '../../../../features/storage/data/services/storage_scanner_service.dart';
+import '../../../../features/storage/domain/models/scanned_file.dart';
 import '../../../../features/storage/presentation/providers/device_storage_provider.dart';
 import '../../../../features/storage/presentation/providers/storage_scan_provider.dart';
 import '../../../../routes/app_navigation.dart';
@@ -34,16 +34,7 @@ class DashboardPage extends ConsumerWidget {
     ref.watch(agentMonitoringProvider);
 
     Future<void> runScan() async {
-      try {
-        await ref.read(storageScanProvider.notifier).scan();
-        ref.invalidate(deviceStorageStatsProvider);
-        ref.invalidate(deviceStorageStatsWithHealthProvider);
-      } catch (error) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_scanErrorMessage(error))));
-      }
+      await context.pushScanResults();
     }
 
     return Scaffold(
@@ -181,10 +172,12 @@ class _AgentAssistantCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                'Preparing local storage report...',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onPrimaryContainer,
+              Expanded(
+                child: Text(
+                  'Preparing local storage report...',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onPrimaryContainer,
+                  ),
                 ),
               ),
             ],
@@ -356,33 +349,55 @@ class _AutomationCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(icon, color: colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 360;
+            final leading = Icon(icon, color: colorScheme.primary);
+            final details = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  value,
+                  maxLines: compact ? 2 : 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            );
+            final action = TextButton(
+              onPressed: onPressed,
+              child: Text(actionLabel),
+            );
+
+            if (compact) {
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                  leading,
+                  const SizedBox(height: 10),
+                  details,
+                  Align(alignment: Alignment.centerRight, child: action),
                 ],
-              ),
-            ),
-            TextButton(onPressed: onPressed, child: Text(actionLabel)),
-          ],
+              );
+            }
+
+            return Row(
+              children: [
+                leading,
+                const SizedBox(width: 12),
+                Expanded(child: details),
+                action,
+              ],
+            );
+          },
         ),
       ),
     );
@@ -563,9 +578,7 @@ class _ScanResultsSummary extends StatelessWidget {
       data: (state) {
         if (!state.hasScanned) return const SizedBox.shrink();
 
-        final largestFiles = [...state.files]
-          ..sort((a, b) => b.size.compareTo(a.size));
-        final previewFiles = largestFiles.take(3).toList(growable: false);
+        final previewFiles = _largestFilesPreview(state.files);
 
         return Container(
           padding: const EdgeInsets.all(20),
@@ -1170,9 +1183,10 @@ class _HealthCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
-      child: Row(
-        children: [
-          Container(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 360;
+          final scoreMark = Container(
             width: 62,
             height: 62,
             decoration: BoxDecoration(
@@ -1187,32 +1201,28 @@ class _HealthCard extends StatelessWidget {
                 fontWeight: FontWeight.w900,
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Device Health Score',
-                  style: textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+          );
+          final details = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Device Health Score',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  status.message,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                status.message,
+                maxLines: compact ? 3 : 2,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
+              ),
+            ],
+          );
+          final badge = Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
               color: status.color.withValues(alpha: 0.1),
@@ -1224,8 +1234,29 @@ class _HealthCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: textTheme.labelSmall?.copyWith(color: status.color),
             ),
-          ),
-        ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [scoreMark, const SizedBox(width: 12), badge]),
+                const SizedBox(height: 14),
+                details,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              scoreMark,
+              const SizedBox(width: 16),
+              Expanded(child: details),
+              const SizedBox(width: 10),
+              badge,
+            ],
+          );
+        },
       ),
     );
   }
@@ -1398,6 +1429,27 @@ String _formatShortDateTime(DateTime value) {
   final minute = value.minute.toString().padLeft(2, '0');
   final period = value.hour >= 12 ? 'PM' : 'AM';
   return '${value.month}/${value.day}, $hour:$minute $period';
+}
+
+List<ScannedFile> _largestFilesPreview(List<ScannedFile> files) {
+  final largest = <ScannedFile>[];
+
+  for (final file in files) {
+    var insertAt = largest.length;
+    for (var index = 0; index < largest.length; index++) {
+      if (file.size > largest[index].size) {
+        insertAt = index;
+        break;
+      }
+    }
+
+    if (insertAt < 3) {
+      largest.insert(insertAt, file);
+      if (largest.length > 3) largest.removeLast();
+    }
+  }
+
+  return largest;
 }
 
 class _GaugePainter extends CustomPainter {

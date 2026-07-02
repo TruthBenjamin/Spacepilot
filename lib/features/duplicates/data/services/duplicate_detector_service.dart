@@ -16,13 +16,17 @@ final class DuplicateDetectorService {
   }) async {
     final files = <File>[];
 
-    await for (final entity in root.list(
-      recursive: recursive,
-      followLinks: followLinks,
-    )) {
-      if (entity is File) {
-        files.add(entity);
+    try {
+      await for (final entity in root.list(
+        recursive: recursive,
+        followLinks: followLinks,
+      )) {
+        if (entity is File) {
+          files.add(entity);
+        }
       }
+    } on FileSystemException {
+      return const [];
     }
 
     return findDuplicates(files, minSizeBytes: minSizeBytes);
@@ -51,9 +55,10 @@ final class DuplicateDetectorService {
       final candidatesByHash = <String, List<_FileCandidate>>{};
       for (final candidate in sameSizeFiles) {
         final hash = await _sha256Hash(candidate.file);
-        candidatesByHash.putIfAbsent(hash, () => <_FileCandidate>[]).add(
-          candidate,
-        );
+        if (hash == null) continue;
+        candidatesByHash
+            .putIfAbsent(hash, () => <_FileCandidate>[])
+            .add(candidate);
       }
 
       for (final entry in candidatesByHash.entries) {
@@ -96,12 +101,20 @@ final class DuplicateDetectorService {
       );
     } on FileSystemException {
       return null;
+    } on Exception {
+      return null;
     }
   }
 
-  Future<String> _sha256Hash(File file) async {
-    final digest = await sha256.bind(file.openRead()).first;
-    return digest.toString();
+  Future<String?> _sha256Hash(File file) async {
+    try {
+      final digest = await sha256.bind(file.openRead()).first;
+      return digest.toString();
+    } on FileSystemException {
+      return null;
+    } on Exception {
+      return null;
+    }
   }
 
   DuplicateFile _toDuplicateFile(_FileCandidate candidate) {

@@ -21,10 +21,45 @@ class SpaceBackground extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          const Positioned.fill(child: _StarField()),
+          const Positioned.fill(child: RepaintBoundary(child: _StarField())),
           Positioned.fill(child: child),
         ],
       ),
+    );
+  }
+}
+
+class SpacePageList extends StatelessWidget {
+  const SpacePageList({
+    required this.children,
+    this.padding = const EdgeInsets.fromLTRB(20, 12, 20, 28),
+    this.maxWidth = 1040,
+    super.key,
+  });
+
+  final List<Widget> children;
+  final EdgeInsets padding;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final extraWidth = (constraints.maxWidth - maxWidth)
+            .clamp(0, double.infinity)
+            .toDouble();
+        final sideInset = extraWidth / 2;
+
+        return ListView(
+          padding: EdgeInsets.fromLTRB(
+            padding.left + sideInset,
+            padding.top,
+            padding.right + sideInset,
+            padding.bottom,
+          ),
+          children: children,
+        );
+      },
     );
   }
 }
@@ -44,6 +79,7 @@ class SpaceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
 
     return Container(
       padding: padding,
@@ -59,14 +95,12 @@ class SpaceCard extends StatelessWidget {
               ],
             ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: const Color(0xFF7C3AED).withValues(alpha: 0.22),
-        ),
+        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.32),
-            blurRadius: 24,
-            offset: const Offset(0, 14),
+            color: colorScheme.shadow.withValues(alpha: isDark ? 0.34 : 0.12),
+            blurRadius: isDark ? 24 : 18,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -94,7 +128,11 @@ class _StarField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(painter: _StarFieldPainter());
+    return CustomPaint(
+      isComplex: true,
+      willChange: false,
+      painter: const _StarFieldPainter(),
+    );
   }
 }
 

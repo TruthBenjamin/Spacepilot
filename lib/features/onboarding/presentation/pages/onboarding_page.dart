@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -118,75 +120,94 @@ class _OnboardingSlide extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Spacer(),
-        RichText(
-          text: TextSpan(
-            style: textTheme.headlineMedium?.copyWith(
-              color: Colors.white,
-              fontWeight: FontWeight.w900,
-              height: 1.08,
-            ),
-            children: [
-              TextSpan(text: '${slide.title.split('&').first.trim()} '),
-              if (slide.title.contains('&'))
-                const TextSpan(
-                  text: '& fast',
-                  style: TextStyle(color: Color(0xFF9B5CFF)),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          slide.body,
-          style: textTheme.bodyMedium?.copyWith(
-            color: Colors.white.withValues(alpha: 0.74),
-            height: 1.45,
-          ),
-        ),
-        const Spacer(),
-        Center(
-          child: SizedBox.square(
-            dimension: 260,
-            child: Stack(
-              alignment: Alignment.center,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compactHeight = constraints.maxHeight < 560;
+        final artSize = math.min(
+          260.0,
+          math.min(constraints.maxWidth * 0.78, constraints.maxHeight * 0.42),
+        );
+
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 230,
-                  height: 230,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: const Color(0xFF9B5CFF).withValues(alpha: 0.36),
+                SizedBox(height: compactHeight ? 24 : 48),
+                RichText(
+                  text: TextSpan(
+                    style: textTheme.headlineMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      height: 1.08,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF7C3AED).withValues(alpha: 0.36),
-                        blurRadius: 42,
-                      ),
+                    children: [
+                      TextSpan(text: '${slide.title.split('&').first.trim()} '),
+                      if (slide.title.contains('&'))
+                        const TextSpan(
+                          text: '& fast',
+                          style: TextStyle(color: Color(0xFF9B5CFF)),
+                        ),
                     ],
                   ),
                 ),
-                Transform.rotate(
-                  angle: -0.28,
-                  child: SpaceCard(
-                    padding: const EdgeInsets.all(28),
-                    child: Icon(
-                      slide.icon,
-                      color: const Color(0xFFB990FF),
-                      size: 92,
+                const SizedBox(height: 14),
+                Text(
+                  slide.body,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.74),
+                    height: 1.45,
+                  ),
+                ),
+                SizedBox(height: compactHeight ? 28 : 48),
+                Center(
+                  child: SizedBox.square(
+                    dimension: artSize,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: artSize * 0.88,
+                          height: artSize * 0.88,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: const Color(
+                                0xFF9B5CFF,
+                              ).withValues(alpha: 0.36),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(
+                                  0xFF7C3AED,
+                                ).withValues(alpha: 0.28),
+                                blurRadius: 34,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Transform.rotate(
+                          angle: -0.28,
+                          child: SpaceCard(
+                            padding: EdgeInsets.all(artSize * 0.1),
+                            child: Icon(
+                              slide.icon,
+                              color: const Color(0xFFB990FF),
+                              size: artSize * 0.35,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
+                SizedBox(height: compactHeight ? 24 : 48),
               ],
             ),
           ),
-        ),
-        const Spacer(),
-      ],
+        );
+      },
     );
   }
 }

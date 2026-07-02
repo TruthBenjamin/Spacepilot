@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../../../storage/data/services/storage_scanner_service.dart';
+import '../../../storage/domain/models/scanned_file.dart';
 
 @immutable
 final class StorageAnalytics {

@@ -1,31 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-@immutable
-final class ScannedFile {
-  const ScannedFile({
-    required this.filename,
-    required this.path,
-    required this.size,
-    required this.lastModified,
-  });
-
-  factory ScannedFile.fromMap(Map<Object?, Object?> map) {
-    return ScannedFile(
-      filename: map['filename']! as String,
-      path: map['path']! as String,
-      size: map['size']! as int,
-      lastModified: DateTime.fromMillisecondsSinceEpoch(
-        map['lastModified']! as int,
-      ),
-    );
-  }
-
-  final String filename;
-  final String path;
-  final int size;
-  final DateTime lastModified;
-}
+import '../../domain/models/scanned_file.dart';
 
 /// Scans shared storage folders through the Android platform channel.
 final class StorageScannerService {
@@ -48,7 +24,38 @@ final class StorageScannerService {
     if (files == null) return const [];
 
     return files
-        .map((file) => ScannedFile.fromMap(file! as Map<Object?, Object?>))
+        .whereType<Map<Object?, Object?>>()
+        .map((file) {
+          try {
+            return _scannedFileFromMap(file);
+          } on FormatException {
+            return null;
+          }
+        })
+        .nonNulls
         .toList(growable: false);
   }
+}
+
+ScannedFile _scannedFileFromMap(Map<Object?, Object?> map) {
+  final filename = map['filename'];
+  final path = map['path'];
+  final size = map['size'];
+  final lastModified = map['lastModified'];
+
+  if (filename is! String ||
+      path is! String ||
+      size is! num ||
+      lastModified is! num) {
+    throw const FormatException('Invalid scanned file payload.');
+  }
+
+  final safeSize = size.toInt();
+
+  return ScannedFile(
+    filename: filename,
+    path: path,
+    size: safeSize < 0 ? 0 : safeSize,
+    lastModified: DateTime.fromMillisecondsSinceEpoch(lastModified.toInt()),
+  );
 }

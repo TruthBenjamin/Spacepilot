@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:spacepilot/features/duplicates/domain/models/models.dart';
 import 'package:spacepilot/features/recommendations/data/services/services.dart';
 import 'package:spacepilot/features/recommendations/domain/models/models.dart';
-import 'package:spacepilot/features/storage/data/services/storage_scanner_service.dart';
+import 'package:spacepilot/features/storage/domain/models/scanned_file.dart';
 
 void main() {
   const engine = RecommendationEngine();
@@ -65,6 +65,64 @@ void main() {
     expect(
       recommendations.map((item) => item.storageSavingsBytes),
       [20, 15, 10, 5],
+    );
+  });
+
+  test('does not recommend files that are newer than age thresholds', () {
+    final now = DateTime(2026, 6, 28);
+
+    final recommendations = engine.buildRecommendations(
+      now: now,
+      files: [
+        ScannedFile(
+          filename: 'Screenshot_recent.png',
+          path: '/storage/Pictures/Screenshots/Screenshot_recent.png',
+          size: 5,
+          lastModified: now.subtract(const Duration(days: 89)),
+        ),
+        ScannedFile(
+          filename: 'notes.txt',
+          path: '/storage/Downloads/notes.txt',
+          size: 10,
+          lastModified: now.subtract(const Duration(days: 179)),
+        ),
+      ],
+      duplicateGroups: const [],
+    );
+
+    expect(recommendations, isEmpty);
+  });
+
+  test('routes duplicate recommendations to duplicate review', () {
+    final recommendations = engine.buildRecommendations(
+      now: DateTime(2026, 6, 28),
+      files: const [],
+      duplicateGroups: [
+        DuplicateGroup(
+          sha256Hash: 'hash',
+          sizeBytes: 20,
+          files: [
+            DuplicateFile(
+              name: 'a.txt',
+              path: '/storage/Downloads/a.txt',
+              sizeBytes: 20,
+              lastModified: DateTime(2026),
+            ),
+            DuplicateFile(
+              name: 'b.txt',
+              path: '/storage/Downloads/b.txt',
+              sizeBytes: 20,
+              lastModified: DateTime(2026),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    expect(recommendations, hasLength(1));
+    expect(
+      recommendations.single.actionTarget,
+      RecommendationActionTarget.duplicates,
     );
   });
 }

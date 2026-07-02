@@ -19,8 +19,7 @@ class SettingsPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: SpaceBackground(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          child: SpacePageList(
             children: [
               _ScheduledScanCard(config: scheduledScan),
               const SizedBox(height: 16),
@@ -79,18 +78,24 @@ class _ScheduledScanCard extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 12),
-            SegmentedButton<ScheduledScanFrequency>(
-              segments: [
-                for (final frequency in ScheduledScanFrequency.values)
-                  ButtonSegment(
-                    value: frequency,
-                    label: Text(frequency.label),
-                  ),
-              ],
-              selected: {config.frequency},
-              onSelectionChanged: config.enabled
-                  ? (values) => controller.setFrequency(values.first)
-                  : null,
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<ScheduledScanFrequency>(
+                segments: [
+                  for (final frequency in ScheduledScanFrequency.values)
+                    ButtonSegment(
+                      value: frequency,
+                      label: Text(frequency.label),
+                    ),
+                ],
+                selected: {config.frequency},
+                onSelectionChanged: config.enabled
+                    ? (values) {
+                        if (values.isEmpty) return;
+                        controller.setFrequency(values.first);
+                      }
+                    : null,
+              ),
             ),
             const SizedBox(height: 12),
             ListTile(
@@ -109,7 +114,7 @@ class _ScheduledScanCard extends ConsumerWidget {
                           minute: config.minutesAfterMidnight % 60,
                         ),
                       );
-                      if (picked == null) return;
+                      if (picked == null || !context.mounted) return;
                       controller.setMinutesAfterMidnight(
                         picked.hour * 60 + picked.minute,
                       );
@@ -220,30 +225,52 @@ class _AutoCleanPlanCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            const Icon(Icons.rule_rounded),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 360;
+            final icon = Icon(
+              Icons.rule_rounded,
+              color: Theme.of(context).colorScheme.primary,
+            );
+            final details = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$ruleCount active ${ruleCount == 1 ? 'rule' : 'rules'}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  '$fileCount files matched | ${_formatBytes(savingsBytes)} potential savings',
+                  maxLines: compact ? 3 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            );
+
+            if (compact) {
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '$ruleCount active ${ruleCount == 1 ? 'rule' : 'rules'}',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  Text(
-                    '$fileCount files matched | ${_formatBytes(savingsBytes)} potential savings',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                  icon,
+                  const SizedBox(height: 12),
+                  details,
                 ],
-              ),
-            ),
-          ],
+              );
+            }
+
+            return Row(
+              children: [
+                icon,
+                const SizedBox(width: 14),
+                Expanded(child: details),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -267,7 +294,7 @@ class _LoadingCard extends StatelessWidget {
               child: CircularProgressIndicator(strokeWidth: 2.3),
             ),
             const SizedBox(width: 12),
-            Text(label),
+            Expanded(child: Text(label)),
           ],
         ),
       ),

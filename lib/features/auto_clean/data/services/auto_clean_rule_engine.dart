@@ -1,5 +1,5 @@
 import '../../../duplicates/domain/models/duplicate_group.dart';
-import '../../../storage/data/services/storage_scanner_service.dart';
+import '../../../storage/domain/models/scanned_file.dart';
 import '../../domain/models/auto_clean_rules.dart';
 
 final class AutoCleanRuleEngine {

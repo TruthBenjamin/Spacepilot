@@ -22,10 +22,15 @@ final class DeviceStorageService {
       throw StateError('Device storage stats were unavailable.');
     }
 
-    final totalBytes = (stats['totalBytes'] as num?)?.toInt() ?? 0;
-    final freeBytes = (stats['freeBytes'] as num?)?.toInt() ?? 0;
-    final usedBytes =
+    final reportedTotalBytes = (stats['totalBytes'] as num?)?.toInt() ?? 0;
+    final totalBytes = reportedTotalBytes < 0 ? 0 : reportedTotalBytes;
+    final reportedFreeBytes = (stats['freeBytes'] as num?)?.toInt() ?? 0;
+    final freeBytes = reportedFreeBytes.clamp(0, totalBytes).toInt();
+    final reportedUsedBytes =
         (stats['usedBytes'] as num?)?.toInt() ?? totalBytes - freeBytes;
+    final usedBytes = reportedUsedBytes
+        .clamp(0, totalBytes - freeBytes)
+        .toInt();
     final capturedAt = (stats['capturedAt'] as num?)?.toInt();
 
     return StorageStats(

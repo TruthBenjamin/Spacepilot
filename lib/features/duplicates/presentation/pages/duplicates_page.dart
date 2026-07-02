@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import '../../../cleanup/data/services/cleanup_service.dart';
 import '../../../cleanup/presentation/providers/cleanup_service_provider.dart';
@@ -21,6 +22,17 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
   final Set<String> _selectedPaths = {};
   final Set<String> _initializedGroups = {};
   bool _isDeleting = false;
+
+  Future<void> _runScan() async {
+    try {
+      await ref.read(storageScanProvider.notifier).scan();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_scanErrorMessage(error))));
+    }
+  }
 
   void _initializeSelections(List<DuplicateGroup> groups) {
     for (final group in groups) {
@@ -45,9 +57,23 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
     if (approved != true || !mounted) return;
 
     setState(() => _isDeleting = true);
-    final result = await ref
-        .read(cleanupServiceProvider)
-        .deleteDuplicates(groups, selectedPaths: Set<String>.of(_selectedPaths));
+    final CleanupResult result;
+    try {
+      result = await ref
+          .read(cleanupServiceProvider)
+          .deleteDuplicates(
+            groups,
+            selectedPaths: Set<String>.of(_selectedPaths),
+            userConfirmed: true,
+          );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _isDeleting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Duplicate files could not be deleted.')),
+      );
+      return;
+    }
     if (!mounted) return;
 
     ref
@@ -77,123 +103,148 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
       body: SpaceBackground(
         child: SafeArea(
           child: groups.when(
-          loading: () => const _LoadingState(),
-          error: (error, _) => _ErrorState(
-            message: 'Duplicate files could not be analyzed.',
-            onRetry: () => ref.invalidate(duplicateGroupsProvider),
-          ),
-          data: (duplicateGroups) {
-            _initializeSelections(duplicateGroups);
+            loading: () => const _LoadingState(),
+            error: (error, _) => _ErrorState(
+              message: 'Duplicate files could not be analyzed.',
+              onRetry: () => ref.invalidate(duplicateGroupsProvider),
+            ),
+            data: (duplicateGroups) {
+              _initializeSelections(duplicateGroups);
 
-            if (scan.value?.hasScanned != true) {
-              return _EmptyState(
-                icon: Icons.copy_all_rounded,
-                title: 'Scan to uncover duplicate files',
-                message:
-                    'SpacePilot compares file contents so matching files can be selected safely.',
-                actionLabel: 'Run storage scan',
-                onAction: () => ref.read(storageScanProvider.notifier).scan(),
+              if (scan.value?.hasScanned != true) {
+                return _EmptyState(
+                  icon: Icons.copy_all_rounded,
+                  title: 'Scan to uncover duplicate files',
+                  message:
+                      'SpacePilot compares file contents so matching files can be selected safely.',
+                  actionLabel: 'Run storage scan',
+                  onAction: _runScan,
+                );
+              }
+
+              if (duplicateGroups.isEmpty) {
+                return const _EmptyState(
+                  icon: Icons.verified_rounded,
+                  title: 'No duplicate files found',
+                  message:
+                      'Your scanned folders are already free of exact copies.',
+                );
+              }
+
+              final fileCount = duplicateGroups.fold<int>(
+                0,
+                (total, group) => total + group.files.length,
               );
-            }
-
-            if (duplicateGroups.isEmpty) {
-              return const _EmptyState(
-                icon: Icons.verified_rounded,
-                title: 'No duplicate files found',
-                message:
-                    'Your scanned folders are already free of exact copies.',
+              final wastedBytes = duplicateGroups.fold<int>(
+                0,
+                (total, group) => total + group.recoverableBytes,
               );
-            }
+              final selectedBytes = duplicateGroups
+                  .expand((group) => group.files)
+                  .where((file) => _selectedPaths.contains(file.path))
+                  .fold<int>(0, (total, file) => total + file.sizeBytes);
 
-            final fileCount = duplicateGroups.fold<int>(
-              0,
-              (total, group) => total + group.files.length,
-            );
-            final wastedBytes = duplicateGroups.fold<int>(
-              0,
-              (total, group) => total + group.recoverableBytes,
-            );
-            final selectedBytes = duplicateGroups
-                .expand((group) => group.files)
-                .where((file) => _selectedPaths.contains(file.path))
-                .fold<int>(0, (total, file) => total + file.sizeBytes);
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  const maxWidth = 1040.0;
+                  final extraWidth = (constraints.maxWidth - maxWidth).clamp(
+                    0,
+                    double.infinity,
+                  ).toDouble();
+                  final sideInset = extraWidth / 2;
 
-            return CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-                  sliver: SliverList.list(
-                    children: [
-                      _SummaryCard(
-                        groupCount: duplicateGroups.length,
-                        fileCount: fileCount,
-                        wastedBytes: wastedBytes,
-                      ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Duplicate groups',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          Text(
-                            '${_selectedPaths.length} selected',
-                            style: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      for (
-                        var index = 0;
-                        index < duplicateGroups.length;
-                        index++
-                      ) ...[
-                        _DuplicateGroupCard(
-                          index: index,
-                          group: duplicateGroups[index],
-                          selectedPaths: _selectedPaths,
-                          onFileChanged: (path, selected) {
-                            setState(() {
-                              selected
-                                  ? _selectedPaths.add(path)
-                                  : _selectedPaths.remove(path);
-                            });
-                          },
-                          onGroupChanged: (selected) {
-                            setState(() {
-                              final selectable = duplicateGroups[index].files
-                                  .skip(1)
-                                  .map((file) => file.path);
-                              selected
-                                  ? _selectedPaths.addAll(selectable)
-                                  : _selectedPaths.removeAll(selectable);
-                            });
-                          },
+                  return CustomScrollView(
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          20 + sideInset,
+                          12,
+                          20 + sideInset,
+                          28,
                         ),
-                        const SizedBox(height: 12),
-                      ],
-                      _SelectionSummary(
-                        count: _selectedPaths.length,
-                        bytes: selectedBytes,
-                        isDeleting: _isDeleting,
-                        onDelete: () => _confirmAndDeleteDuplicates(
-                          duplicateGroups,
-                          selectedBytes,
+                        sliver: SliverList.list(
+                          children: [
+                            _SummaryCard(
+                              groupCount: duplicateGroups.length,
+                              fileCount: fileCount,
+                              wastedBytes: wastedBytes,
+                            ),
+                            const SizedBox(height: 24),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Duplicate groups',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                  ),
+                                ),
+                                Text(
+                                  '${_selectedPaths.length} selected',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelLarge
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            for (
+                              var index = 0;
+                              index < duplicateGroups.length;
+                              index++
+                            ) ...[
+                              _DuplicateGroupCard(
+                                index: index,
+                                group: duplicateGroups[index],
+                                selectedPaths: _selectedPaths,
+                                onFileChanged: (path, selected) {
+                                  setState(() {
+                                    selected
+                                        ? _selectedPaths.add(path)
+                                        : _selectedPaths.remove(path);
+                                  });
+                                },
+                                onGroupChanged: (selected) {
+                                  setState(() {
+                                    final selectable = duplicateGroups[index]
+                                        .files
+                                        .skip(1)
+                                        .map((file) => file.path);
+                                    selected
+                                        ? _selectedPaths.addAll(selectable)
+                                        : _selectedPaths.removeAll(selectable);
+                                  });
+                                },
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            _SelectionSummary(
+                              count: _selectedPaths.length,
+                              bytes: selectedBytes,
+                              isDeleting: _isDeleting,
+                              onDelete: () => _confirmAndDeleteDuplicates(
+                                duplicateGroups,
+                                selectedBytes,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
-                  ),
-                ),
-              ],
-            );
-          },
+                  );
+                },
+              );
+            },
           ),
         ),
       ),
@@ -479,6 +530,9 @@ class _SelectionSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final title = count == 0
+        ? 'No duplicates selected'
+        : '$count duplicate ${count == 1 ? 'file' : 'files'} selected';
 
     return Card(
       color: colorScheme.secondaryContainer,
@@ -486,28 +540,47 @@ class _SelectionSummary extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    count == 0
-                        ? 'No duplicates selected'
-                        : '$count duplicate ${count == 1 ? 'file' : 'files'} selected',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 360;
+                final icon = Icon(
+                  Icons.check_circle_rounded,
+                  color: colorScheme.primary,
+                );
+                final label = Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
-                ),
-                Text(
+                );
+                final amount = Text(
                   _formatBytes(bytes),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w900,
                   ),
-                ),
-              ],
+                );
+
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [icon, const SizedBox(width: 12), amount]),
+                      const SizedBox(height: 8),
+                      label,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: 12),
+                    Expanded(child: label),
+                    amount,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -633,6 +706,16 @@ String _parentDirectory(String path) {
   final lastSeparator = normalized.lastIndexOf('/');
   if (lastSeparator <= 0) return path;
   return normalized.substring(0, lastSeparator);
+}
+
+String _scanErrorMessage(Object error) {
+  if (error is PlatformException && error.code == 'PERMISSION_DENIED') {
+    return 'Storage and media access are required to scan your files.';
+  }
+  if (error is UnsupportedError) {
+    return 'Duplicate scans require Android storage access.';
+  }
+  return 'The storage scan could not be completed. Please try again.';
 }
 
 Future<bool?> _showDeleteConfirmation(

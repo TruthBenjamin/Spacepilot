@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
-import '../../../storage/data/services/storage_scanner_service.dart';
+import '../../../storage/domain/models/scanned_file.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
 
 enum LargeFileThreshold {
@@ -21,10 +21,14 @@ final largeFileThresholdProvider = StateProvider<LargeFileThreshold>((ref) {
 
 final largeFileHunterProvider = Provider<AsyncValue<List<ScannedFile>>>((ref) {
   final threshold = ref.watch(largeFileThresholdProvider);
-  final scan = ref.watch(storageScanProvider);
+  final scannedFiles = ref.watch(
+    storageScanProvider.select(
+      (scan) => scan.whenData((state) => state.files),
+    ),
+  );
 
-  return scan.whenData((state) {
-    final files = state.files
+  return scannedFiles.whenData((scannedFiles) {
+    final files = scannedFiles
         .where((file) => file.size > threshold.bytes)
         .toList(growable: false)
       ..sort((a, b) => b.size.compareTo(a.size));

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,9 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../cleanup/data/services/cleanup_service.dart';
 import '../../../cleanup/presentation/providers/cleanup_service_provider.dart';
 import '../../../../shared/presentation/widgets/space_background.dart';
-import '../../../storage/data/services/storage_scanner_service.dart';
+import '../../../storage/domain/models/scanned_file.dart';
 import '../../../storage/presentation/providers/device_storage_provider.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
+import '../../../../routes/app_navigation.dart';
 import '../providers/large_file_hunter_provider.dart';
 
 class LargeFilesPage extends ConsumerStatefulWidget {
@@ -20,8 +22,14 @@ class LargeFilesPage extends ConsumerStatefulWidget {
 }
 
 class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
-  final Set<String> _selectedPaths = {};
+  final ValueNotifier<Set<String>> _selectedPaths = ValueNotifier(<String>{});
   bool _isDeleting = false;
+
+  @override
+  void dispose() {
+    _selectedPaths.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,21 +38,15 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
     final largeFiles = ref.watch(largeFileHunterProvider);
 
     Future<void> runScan() async {
-      try {
-        await ref.read(storageScanProvider.notifier).scan();
-      } catch (error) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_scanErrorMessage(error))),
-        );
-      }
+      await context.pushScanResults();
     }
 
     Future<void> deleteSelected(List<ScannedFile> files) async {
-      if (_selectedPaths.isEmpty || _isDeleting) return;
+      final selectedPaths = _selectedPaths.value;
+      if (selectedPaths.isEmpty || _isDeleting) return;
 
       final selectedFiles = files
-          .where((file) => _selectedPaths.contains(file.path))
+          .where((file) => selectedPaths.contains(file.path))
           .toList(growable: false);
       if (selectedFiles.isEmpty) return;
 
@@ -59,13 +61,26 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
         fileCount: selectedFiles.length,
         bytes: selectedBytes,
       );
-      if (approved != true || !mounted) return;
+      if (approved != true || !context.mounted) return;
 
       setState(() => _isDeleting = true);
-      final result = await ref
-          .read(cleanupServiceProvider)
-          .deleteFiles(selectedFiles.map((file) => File(file.path)));
-      if (!mounted) return;
+      final CleanupResult result;
+      try {
+        result = await ref
+            .read(cleanupServiceProvider)
+            .deleteFiles(
+              selectedFiles.map((file) => File(file.path)),
+              userConfirmed: true,
+            );
+      } catch (error) {
+        if (!context.mounted) return;
+        setState(() => _isDeleting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Selected files could not be deleted.')),
+        );
+        return;
+      }
+      if (!context.mounted) return;
 
       ref
           .read(storageScanProvider.notifier)
@@ -74,8 +89,8 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
       ref.invalidate(deviceStorageStatsWithHealthProvider);
       setState(() {
         _isDeleting = false;
-        _selectedPaths.removeAll(result.deletedPaths);
       });
+      _removeSelectedPaths(result.deletedPaths);
 
       ScaffoldMessenger.of(
         context,
@@ -89,64 +104,118 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
       ),
       body: SpaceBackground(
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-            children: [
-            _HeaderCard(
-              isLoading: scanState.isLoading,
-              onScanPressed: runScan,
-            ),
-            const SizedBox(height: 18),
-            _ThresholdPicker(selected: threshold),
-            const SizedBox(height: 18),
-            scanState.when(
-              data: (state) {
-                if (!state.hasScanned) {
-                  return const _EmptyState(
-                    icon: Icons.radar_rounded,
-                    title: 'Run a scan to find large files',
-                    message:
-                        'SpacePilot will inspect Downloads, DCIM, Movies, and Pictures.',
-                  );
-                }
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const pagePadding = EdgeInsets.fromLTRB(20, 12, 20, 28);
+              const maxWidth = 1040.0;
+              final extraWidth = (constraints.maxWidth - maxWidth)
+                  .clamp(0, double.infinity)
+                  .toDouble();
+              final sideInset = extraWidth / 2;
+              final resultPadding = EdgeInsets.fromLTRB(
+                pagePadding.left + sideInset,
+                0,
+                pagePadding.right + sideInset,
+                pagePadding.bottom,
+              );
 
-                return largeFiles.when(
-                  data: (files) => _LargeFileList(
-                    files: files,
-                    threshold: threshold,
-                    selectedPaths: _selectedPaths,
-                    isDeleting: _isDeleting,
-                    onFileChanged: (path, selected) {
-                      setState(() {
-                        selected
-                            ? _selectedPaths.add(path)
-                            : _selectedPaths.remove(path);
-                      });
-                    },
-                    onDeleteSelected: () => deleteSelected(files),
+              return CustomScrollView(
+                slivers: [
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(
+                      pagePadding.left + sideInset,
+                      pagePadding.top,
+                      pagePadding.right + sideInset,
+                      0,
+                    ),
+                    sliver: SliverList.list(
+                      children: [
+                        _HeaderCard(
+                          isLoading: scanState.isLoading,
+                          onScanPressed: runScan,
+                        ),
+                        const SizedBox(height: 18),
+                        _ThresholdPicker(selected: threshold),
+                        const SizedBox(height: 18),
+                      ],
+                    ),
                   ),
-                  error: (error, _) =>
-                      _ErrorState(message: _scanErrorMessage(error)),
-                  loading: () => const _LoadingState(),
-                );
-              },
-              error: (error, _) =>
-                  _ErrorState(message: _scanErrorMessage(error)),
-              loading: () => const _LoadingState(),
-            ),
-            ],
+                  scanState.when(
+                    data: (state) {
+                      if (!state.hasScanned) {
+                        return SliverPadding(
+                          padding: resultPadding,
+                          sliver: const SliverToBoxAdapter(
+                            child: _EmptyState(
+                              icon: Icons.radar_rounded,
+                              title: 'Run a scan to find large files',
+                              message:
+                                  'SpacePilot will inspect Downloads, DCIM, Movies, and Pictures.',
+                            ),
+                          ),
+                        );
+                      }
+
+                      return largeFiles.when(
+                        data: (files) => _LargeFileSliverList(
+                          files: files,
+                          threshold: threshold,
+                          selectedPaths: _selectedPaths,
+                          isDeleting: _isDeleting,
+                          padding: resultPadding,
+                          onFileChanged: _setFileSelected,
+                          onDeleteSelected: () => deleteSelected(files),
+                        ),
+                        error: (error, _) => SliverPadding(
+                          padding: resultPadding,
+                          sliver: SliverToBoxAdapter(
+                            child: _ErrorState(
+                              message: _scanErrorMessage(error),
+                            ),
+                          ),
+                        ),
+                        loading: () => SliverPadding(
+                          padding: resultPadding,
+                          sliver: const SliverToBoxAdapter(
+                            child: _LoadingState(),
+                          ),
+                        ),
+                      );
+                    },
+                    error: (error, _) => SliverPadding(
+                      padding: resultPadding,
+                      sliver: SliverToBoxAdapter(
+                        child: _ErrorState(message: _scanErrorMessage(error)),
+                      ),
+                    ),
+                    loading: () => SliverPadding(
+                      padding: resultPadding,
+                      sliver: const SliverToBoxAdapter(child: _LoadingState()),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
+
+  void _setFileSelected(String path, bool selected) {
+    final updated = Set<String>.of(_selectedPaths.value);
+    selected ? updated.add(path) : updated.remove(path);
+    _selectedPaths.value = updated;
+  }
+
+  void _removeSelectedPaths(Iterable<String> paths) {
+    final updated = Set<String>.of(_selectedPaths.value)..removeAll(paths);
+    _selectedPaths.value = updated;
+  }
 }
 
 class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({
-    required this.isLoading,
-    required this.onScanPressed,
-  });
+  const _HeaderCard({required this.isLoading, required this.onScanPressed});
 
   final bool isLoading;
   final Future<void> Function() onScanPressed;
@@ -214,25 +283,27 @@ class _ThresholdPicker extends ConsumerWidget {
       children: [
         Text(
           'Detect files larger than',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
-          child: SegmentedButton<LargeFileThreshold>(
-            segments: [
-              for (final threshold in LargeFileThreshold.values)
-                ButtonSegment(
-                  value: threshold,
-                  label: Text(threshold.label),
-                ),
-            ],
-            selected: {selected},
-            onSelectionChanged: (values) {
-              ref.read(largeFileThresholdProvider.notifier).state = values.first;
-            },
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<LargeFileThreshold>(
+              segments: [
+                for (final threshold in LargeFileThreshold.values)
+                  ButtonSegment(value: threshold, label: Text(threshold.label)),
+              ],
+              selected: {selected},
+              onSelectionChanged: (values) {
+                if (values.isEmpty) return;
+                ref.read(largeFileThresholdProvider.notifier).state =
+                    values.first;
+              },
+            ),
           ),
         ),
       ],
@@ -240,83 +311,108 @@ class _ThresholdPicker extends ConsumerWidget {
   }
 }
 
-class _LargeFileList extends StatelessWidget {
-  const _LargeFileList({
+class _LargeFileSliverList extends StatelessWidget {
+  const _LargeFileSliverList({
     required this.files,
     required this.threshold,
     required this.selectedPaths,
     required this.isDeleting,
+    required this.padding,
     required this.onFileChanged,
     required this.onDeleteSelected,
   });
 
   final List<ScannedFile> files;
   final LargeFileThreshold threshold;
-  final Set<String> selectedPaths;
+  final ValueListenable<Set<String>> selectedPaths;
   final bool isDeleting;
+  final EdgeInsets padding;
   final void Function(String path, bool selected) onFileChanged;
   final VoidCallback onDeleteSelected;
 
   @override
   Widget build(BuildContext context) {
     if (files.isEmpty) {
-      return _EmptyState(
-        icon: Icons.check_circle_outline_rounded,
-        title: 'No files over ${threshold.label}',
-        message:
-            'Try a smaller threshold or scan again after new files are added.',
+      return SliverPadding(
+        padding: padding,
+        sliver: SliverToBoxAdapter(
+          child: _EmptyState(
+            icon: Icons.check_circle_outline_rounded,
+            title: 'No files over ${threshold.label}',
+            message:
+                'Try a smaller threshold or scan again after new files are added.',
+          ),
+        ),
       );
     }
 
-    final selectedBytes = files
-        .where((file) => selectedPaths.contains(file.path))
-        .fold<int>(0, (total, file) => total + file.size);
-    final selectedCount = files
-        .where((file) => selectedPaths.contains(file.path))
-        .length;
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: selectedPaths,
+      builder: (context, selectedPaths, _) {
+        var selectedBytes = 0;
+        var selectedCount = 0;
+        for (final file in files) {
+          if (!selectedPaths.contains(file.path)) continue;
+          selectedBytes += file.size;
+          selectedCount++;
+        }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '${files.length} files found',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Text(
-              '$selectedCount selected',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        for (final file in files)
-          _LargeFileCard(
-            file: file,
-            selected: selectedPaths.contains(file.path),
-            onChanged: (selected) => onFileChanged(file.path, selected),
+        return SliverPadding(
+          padding: padding,
+          sliver: SliverList.builder(
+            itemCount: files.length + 3,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${files.length} files found',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    Text(
+                      '$selectedCount selected',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              if (index == 1) return const SizedBox(height: 10);
+
+              final fileIndex = index - 2;
+              if (fileIndex == files.length) {
+                return _DeleteSelectionCard(
+                  selectedCount: selectedCount,
+                  selectedBytes: selectedBytes,
+                  isDeleting: isDeleting,
+                  onDelete: onDeleteSelected,
+                );
+              }
+
+              final file = files[fileIndex];
+              return _LargeFileCard(
+                key: ValueKey(file.path),
+                file: file,
+                selected: selectedPaths.contains(file.path),
+                onChanged: (selected) => onFileChanged(file.path, selected),
+              );
+            },
           ),
-        _DeleteSelectionCard(
-          selectedCount: selectedCount,
-          selectedBytes: selectedBytes,
-          isDeleting: isDeleting,
-          onDelete: onDeleteSelected,
-        ),
-      ],
+        );
+      },
     );
   }
 }
 
 class _LargeFileCard extends StatelessWidget {
   const _LargeFileCard({
+    super.key,
     required this.file,
     required this.selected,
     required this.onChanged,
@@ -344,11 +440,7 @@ class _LargeFileCard extends StatelessWidget {
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            file.path,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: Text(file.path, maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         trailing: Text(
           _formatBytes(file.size),
@@ -397,6 +489,9 @@ class _DeleteSelectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final title = selectedCount == 0
+        ? 'No large files selected'
+        : '$selectedCount selected for deletion';
 
     return Card(
       elevation: 0,
@@ -405,28 +500,47 @@ class _DeleteSelectionCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: colorScheme.primary),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    selectedCount == 0
-                        ? 'No large files selected'
-                        : '$selectedCount selected for deletion',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 360;
+                final icon = Icon(
+                  Icons.check_circle_rounded,
+                  color: colorScheme.primary,
+                );
+                final details = Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
-                ),
-                Text(
+                );
+                final bytes = Text(
                   _formatBytes(selectedBytes),
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.w900,
                   ),
-                ),
-              ],
+                );
+
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [icon, const SizedBox(width: 12), bytes]),
+                      const SizedBox(height: 8),
+                      details,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: 12),
+                    Expanded(child: details),
+                    bytes,
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 14),
             SizedBox(

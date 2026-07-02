@@ -10,22 +10,22 @@ final class PermissionService {
 
   Future<bool> hasStorageAccess() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
-    return await _channel.invokeMethod<bool>('hasStorageAccess') ?? false;
+    return _invokeBool('hasStorageAccess');
   }
 
   Future<bool> hasMediaAccess() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
-    return await _channel.invokeMethod<bool>('hasMediaAccess') ?? false;
+    return _invokeBool('hasMediaAccess');
   }
 
   Future<bool> requestStorageAccess() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
-    return await _channel.invokeMethod<bool>('requestStorageAccess') ?? false;
+    return _invokeBool('requestStorageAccess');
   }
 
   Future<bool> requestMediaAccess() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
-    return await _channel.invokeMethod<bool>('requestMediaAccess') ?? false;
+    return _invokeBool('requestMediaAccess');
   }
 
   Future<bool> requestRequiredAccess() async {
@@ -35,5 +35,15 @@ final class PermissionService {
     if (!hasStorage) return false;
 
     return await hasMediaAccess() || await requestMediaAccess();
+  }
+
+  Future<bool> _invokeBool(String method) async {
+    try {
+      return await _channel.invokeMethod<bool>(method) ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
   }
 }

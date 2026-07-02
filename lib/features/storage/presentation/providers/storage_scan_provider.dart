@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../permissions/presentation/providers/permission_service_provider.dart';
 import '../../data/services/storage_scanner_service.dart';
+import '../../domain/models/scanned_file.dart';
 
 final storageScannerServiceProvider = Provider<StorageScannerService>((ref) {
   return StorageScannerService();

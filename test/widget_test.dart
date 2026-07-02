@@ -11,7 +11,7 @@ void main() {
 
     await tester.pump();
 
-    expect(find.text('SpacePilot AI'), findsOneWidget);
-    expect(find.text('Optimizing storage signals...'), findsOneWidget);
+    expect(find.text('Your AI Storage Assistant'), findsOneWidget);
+    expect(find.text('Initializing AI Engine...'), findsOneWidget);
   });
 }
