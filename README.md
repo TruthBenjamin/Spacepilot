@@ -13,6 +13,7 @@ flutter run
 Run checks with:
 
 ```powershell
-dart analyze lib test
+flutter analyze
 flutter test
+.\gradlew.bat :app:assembleDebug
 ```

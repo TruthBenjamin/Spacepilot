@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "ai.spacepilot.app"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     val releaseKeystorePath = System.getenv("SPACEPILOT_RELEASE_STORE_FILE")
@@ -27,7 +27,7 @@ android {
     defaultConfig {
         applicationId = "ai.spacepilot.app"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -36,6 +36,12 @@ android {
         release {
             signingConfig = signingConfigs.findByName("release")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

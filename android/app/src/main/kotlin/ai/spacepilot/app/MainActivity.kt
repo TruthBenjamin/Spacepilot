@@ -291,10 +291,9 @@ class MainActivity : FlutterActivity() {
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO,
             )
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> arrayOf(
+            else -> arrayOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
             )
-            else -> emptyArray()
         }
     }
 

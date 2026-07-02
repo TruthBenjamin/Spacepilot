@@ -94,7 +94,9 @@ class _ScanResultsPageState extends ConsumerState<ScanResultsPage> {
     }
 
     if (!mounted) return;
-    ref.read(storageScanProvider.notifier).removeDeletedPaths(result.deletedPaths);
+    ref
+        .read(storageScanProvider.notifier)
+        .removeDeletedPaths(result.deletedPaths);
     ref.invalidate(deviceStorageStatsProvider);
     ref.invalidate(deviceStorageStatsWithHealthProvider);
     setState(() {
