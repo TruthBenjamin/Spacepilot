@@ -29,9 +29,5 @@ final class DuplicateGroup {
   }
 
   @override
-  int get hashCode => Object.hash(
-    sha256Hash,
-    sizeBytes,
-    Object.hashAll(files),
-  );
+  int get hashCode => Object.hash(sha256Hash, sizeBytes, Object.hashAll(files));
 }

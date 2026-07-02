@@ -131,7 +131,8 @@ class _ScanResultsPageState extends ConsumerState<ScanResultsPage> {
               ? const _SpaceJanitorState(
                   mode: _JanitorMode.cleaning,
                   title: 'Space janitor is cleaning',
-                  message: 'Deleting the selected files and refreshing storage.',
+                  message:
+                      'Deleting the selected files and refreshing storage.',
                 )
               : scan.when(
                   data: (state) {
@@ -698,9 +699,9 @@ class _CleanupCategoryCard extends StatelessWidget {
         leading: Icon(bucket.icon, color: colorScheme.primary),
         title: Text(
           bucket.title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w900,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
         ),
         subtitle: Text(
           '${bucket.files.length} files | ${_formatBytes(bucket.bytes)} | '
@@ -731,9 +732,9 @@ class _CleanupCategoryCard extends StatelessWidget {
                 file.filename,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
               ),
               subtitle: Text(
                 file.path,
@@ -839,9 +840,9 @@ class _SpaceJanitorStateState extends State<_SpaceJanitorState>
             Text(
               widget.title,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
             Text(
@@ -926,9 +927,9 @@ class _EmptyState extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
             Text(
@@ -996,7 +997,8 @@ enum _CleanupCategory {
 
   String get description => switch (this) {
     junk => 'Usually safe candidates such as temporary files, logs, and cache.',
-    installers => 'APK installers are often no longer needed after installation.',
+    installers =>
+      'APK installers are often no longer needed after installation.',
     archives => 'Compressed downloads can take up space after extraction.',
     largeFiles => 'Big files worth reviewing before removal.',
     oldFiles => 'Files not modified in more than 180 days.',
@@ -1055,10 +1057,10 @@ List<_CleanupBucket> _buildCleanupBuckets(List<ScannedFile> files) {
           files: grouped[category]!..sort((a, b) => b.size.compareTo(a.size)),
         ),
   ]..sort((a, b) {
-      final priority = a.priority.compareTo(b.priority);
-      if (priority != 0) return priority;
-      return b.bytes.compareTo(a.bytes);
-    });
+    final priority = a.priority.compareTo(b.priority);
+    if (priority != 0) return priority;
+    return b.bytes.compareTo(a.bytes);
+  });
 }
 
 List<ScannedFile> _suggestFilesForTarget(

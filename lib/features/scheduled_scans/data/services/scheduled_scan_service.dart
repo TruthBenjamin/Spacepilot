@@ -17,8 +17,10 @@ final class ScheduledScanService {
     if (config.lastRunAt == null) return true;
 
     return switch (config.frequency) {
-      ScheduledScanFrequency.daily =>
-        !_sameDay(config.lastRunAt!, scheduledToday),
+      ScheduledScanFrequency.daily => !_sameDay(
+        config.lastRunAt!,
+        scheduledToday,
+      ),
       ScheduledScanFrequency.weekly =>
         now.difference(config.lastRunAt!).inDays >= 7,
       ScheduledScanFrequency.monthly =>

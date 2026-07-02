@@ -13,8 +13,7 @@ final storageAnalyticsProvider = FutureProvider<StorageAnalytics>((ref) async {
   final scan = await ref.watch(storageScanProvider.future);
   final duplicateGroups = await ref.watch(duplicateGroupsProvider.future);
 
-  return ref.read(analyticsEngineProvider).analyze(
-        files: scan.files,
-        duplicateGroups: duplicateGroups,
-      );
+  return ref
+      .read(analyticsEngineProvider)
+      .analyze(files: scan.files, duplicateGroups: duplicateGroups);
 });

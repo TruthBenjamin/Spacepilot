@@ -53,19 +53,18 @@ void main() {
       ],
     );
 
-    expect(
-      recommendations.map((item) => item.type),
-      [
-        StorageRecommendationType.apkInstallers,
-        StorageRecommendationType.duplicateFiles,
-        StorageRecommendationType.unusedFiles,
-        StorageRecommendationType.oldScreenshots,
-      ],
-    );
-    expect(
-      recommendations.map((item) => item.storageSavingsBytes),
-      [20, 15, 10, 5],
-    );
+    expect(recommendations.map((item) => item.type), [
+      StorageRecommendationType.apkInstallers,
+      StorageRecommendationType.duplicateFiles,
+      StorageRecommendationType.unusedFiles,
+      StorageRecommendationType.oldScreenshots,
+    ]);
+    expect(recommendations.map((item) => item.storageSavingsBytes), [
+      20,
+      15,
+      10,
+      5,
+    ]);
   });
 
   test('does not recommend files that are newer than age thresholds', () {

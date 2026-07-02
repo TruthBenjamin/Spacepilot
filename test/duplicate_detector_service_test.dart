@@ -34,27 +34,30 @@ void main() {
     }
   });
 
-  test('findDuplicates ignores same-sized files with different hashes', () async {
-    final tempDir = await Directory.systemTemp.createTemp(
-      'duplicate_detector_test_',
-    );
+  test(
+    'findDuplicates ignores same-sized files with different hashes',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'duplicate_detector_test_',
+      );
 
-    try {
-      final first = File('${tempDir.path}/first.txt');
-      final second = File('${tempDir.path}/second.txt');
+      try {
+        final first = File('${tempDir.path}/first.txt');
+        final second = File('${tempDir.path}/second.txt');
 
-      await first.writeAsString('abc');
-      await second.writeAsString('xyz');
+        await first.writeAsString('abc');
+        await second.writeAsString('xyz');
 
-      final service = DuplicateDetectorService();
+        final service = DuplicateDetectorService();
 
-      final groups = await service.findDuplicates(<File>[first, second]);
+        final groups = await service.findDuplicates(<File>[first, second]);
 
-      expect(groups, isEmpty);
-    } finally {
-      await tempDir.delete(recursive: true);
-    }
-  });
+        expect(groups, isEmpty);
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    },
+  );
 
   test('findDuplicates respects the minimum size threshold', () async {
     final tempDir = await Directory.systemTemp.createTemp(
@@ -70,10 +73,10 @@ void main() {
 
       final service = DuplicateDetectorService();
 
-      final groups = await service.findDuplicates(
-        <File>[first, second],
-        minSizeBytes: 5,
-      );
+      final groups = await service.findDuplicates(<File>[
+        first,
+        second,
+      ], minSizeBytes: 5);
 
       expect(groups, isEmpty);
     } finally {

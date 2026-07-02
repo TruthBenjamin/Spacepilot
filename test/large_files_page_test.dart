@@ -58,8 +58,16 @@ void main() {
 
     await tester.tap(find.text('archive.zip'));
     await tester.pump();
-    await tester.scrollUntilVisible(find.text('Delete selected'), 250);
-    await tester.tap(find.text('Delete selected'));
+    final deleteButton = find.widgetWithText(FilledButton, 'Delete selected');
+    await tester.scrollUntilVisible(
+      deleteButton,
+      250,
+      scrollable: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    await tester.tap(deleteButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Delete selected large files?'), findsOneWidget);

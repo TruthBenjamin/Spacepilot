@@ -30,7 +30,9 @@ final agentReportProvider = FutureProvider<AgentReport>((ref) async {
       .read(agentBackgroundTaskServiceProvider)
       .loadSnapshots();
 
-  return ref.read(agentEngineProvider).generateReport(
+  return ref
+      .read(agentEngineProvider)
+      .generateReport(
         snapshots: snapshots,
         analytics: analytics,
         autoCleanPlan: autoCleanPlan,

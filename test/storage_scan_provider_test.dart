@@ -70,50 +70,56 @@ void main() {
     expect(state.totalBytes, 4096);
   });
 
-  test('scan surfaces permission denial and leaves provider in error', () async {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(permissionChannel, (call) async => false);
-    final container = buildContainer();
+  test(
+    'scan surfaces permission denial and leaves provider in error',
+    () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissionChannel, (call) async => false);
+      final container = buildContainer();
 
-    await expectLater(
-      container.read(storageScanProvider.notifier).scan(),
-      throwsA(
-        isA<PlatformException>().having(
-          (error) => error.code,
-          'code',
-          'PERMISSION_DENIED',
-        ),
-      ),
-    );
-
-    expect(container.read(storageScanProvider).hasError, isTrue);
-  });
-
-  test('removeDeletedPaths removes deleted files but preserves scan status', () {
-    final container = ProviderContainer(
-      overrides: [
-        storageScanProvider.overrideWithBuild(
-          (ref, controller) => StorageScanState(
-            hasScanned: true,
-            files: [
-              _file('keep.txt', '/downloads/keep.txt', 10),
-              _file('delete.txt', '/downloads/delete.txt', 20),
-            ],
+      await expectLater(
+        container.read(storageScanProvider.notifier).scan(),
+        throwsA(
+          isA<PlatformException>().having(
+            (error) => error.code,
+            'code',
+            'PERMISSION_DENIED',
           ),
         ),
-      ],
-    );
-    addTearDown(container.dispose);
+      );
 
-    container
-        .read(storageScanProvider.notifier)
-        .removeDeletedPaths(['/downloads/delete.txt']);
+      expect(container.read(storageScanProvider).hasError, isTrue);
+    },
+  );
 
-    final state = container.read(storageScanProvider).requireValue;
-    expect(state.hasScanned, isTrue);
-    expect(state.files.map((file) => file.path), ['/downloads/keep.txt']);
-    expect(state.totalBytes, 10);
-  });
+  test(
+    'removeDeletedPaths removes deleted files but preserves scan status',
+    () {
+      final container = ProviderContainer(
+        overrides: [
+          storageScanProvider.overrideWithBuild(
+            (ref, controller) => StorageScanState(
+              hasScanned: true,
+              files: [
+                _file('keep.txt', '/downloads/keep.txt', 10),
+                _file('delete.txt', '/downloads/delete.txt', 20),
+              ],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.read(storageScanProvider.notifier).removeDeletedPaths([
+        '/downloads/delete.txt',
+      ]);
+
+      final state = container.read(storageScanProvider).requireValue;
+      expect(state.hasScanned, isTrue);
+      expect(state.files.map((file) => file.path), ['/downloads/keep.txt']);
+      expect(state.totalBytes, 10);
+    },
+  );
 }
 
 ScannedFile _file(String filename, String path, int size) {

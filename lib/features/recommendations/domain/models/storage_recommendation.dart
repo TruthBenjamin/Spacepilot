@@ -24,7 +24,4 @@ enum StorageRecommendationType {
   apkInstallers,
 }
 
-enum RecommendationActionTarget {
-  scanResults,
-  duplicates,
-}
+enum RecommendationActionTarget { scanResults, duplicates }

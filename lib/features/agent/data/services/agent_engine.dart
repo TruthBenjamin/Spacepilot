@@ -105,42 +105,46 @@ final class AgentEngine {
     required AutoCleanPlan autoCleanPlan,
     required StorageShortagePrediction prediction,
   }) {
-    final suggestions = <AgentCleanupSuggestion>[
-      if (analytics.duplicateBytes > 0)
-        AgentCleanupSuggestion(
-          title: 'Review duplicate copies',
-          reason: '${analytics.duplicateGroups} duplicate groups found locally',
-          estimatedSavingsBytes: analytics.duplicateBytes,
-          priority: AgentSuggestionPriority.high,
-        ),
-      if (autoCleanPlan.estimatedSavingsBytes > 0)
-        AgentCleanupSuggestion(
-          title: 'Apply auto-clean review rules',
-          reason: '${autoCleanPlan.fileCount} files match your local rules',
-          estimatedSavingsBytes: autoCleanPlan.estimatedSavingsBytes,
-          priority: prediction.willRunShort
-              ? AgentSuggestionPriority.high
-              : AgentSuggestionPriority.medium,
-        ),
-      if (analytics.junkBytes > 0)
-        AgentCleanupSuggestion(
-          title: 'Clear junk files',
-          reason: '${analytics.junkFileCount} cache, temp, or log files found',
-          estimatedSavingsBytes: analytics.junkBytes,
-          priority: AgentSuggestionPriority.medium,
-        ),
-      if (analytics.unusedBytes > 0)
-        AgentCleanupSuggestion(
-          title: 'Review old unused files',
-          reason: '${analytics.unusedFileCount} files are older than 180 days',
-          estimatedSavingsBytes: analytics.unusedBytes,
-          priority: AgentSuggestionPriority.low,
-        ),
-    ]..sort((a, b) {
-        final priority = b.priority.index.compareTo(a.priority.index);
-        if (priority != 0) return priority;
-        return b.estimatedSavingsBytes.compareTo(a.estimatedSavingsBytes);
-      });
+    final suggestions =
+        <AgentCleanupSuggestion>[
+          if (analytics.duplicateBytes > 0)
+            AgentCleanupSuggestion(
+              title: 'Review duplicate copies',
+              reason:
+                  '${analytics.duplicateGroups} duplicate groups found locally',
+              estimatedSavingsBytes: analytics.duplicateBytes,
+              priority: AgentSuggestionPriority.high,
+            ),
+          if (autoCleanPlan.estimatedSavingsBytes > 0)
+            AgentCleanupSuggestion(
+              title: 'Apply auto-clean review rules',
+              reason: '${autoCleanPlan.fileCount} files match your local rules',
+              estimatedSavingsBytes: autoCleanPlan.estimatedSavingsBytes,
+              priority: prediction.willRunShort
+                  ? AgentSuggestionPriority.high
+                  : AgentSuggestionPriority.medium,
+            ),
+          if (analytics.junkBytes > 0)
+            AgentCleanupSuggestion(
+              title: 'Clear junk files',
+              reason:
+                  '${analytics.junkFileCount} cache, temp, or log files found',
+              estimatedSavingsBytes: analytics.junkBytes,
+              priority: AgentSuggestionPriority.medium,
+            ),
+          if (analytics.unusedBytes > 0)
+            AgentCleanupSuggestion(
+              title: 'Review old unused files',
+              reason:
+                  '${analytics.unusedFileCount} files are older than 180 days',
+              estimatedSavingsBytes: analytics.unusedBytes,
+              priority: AgentSuggestionPriority.low,
+            ),
+        ]..sort((a, b) {
+          final priority = b.priority.index.compareTo(a.priority.index);
+          if (priority != 0) return priority;
+          return b.estimatedSavingsBytes.compareTo(a.estimatedSavingsBytes);
+        });
 
     return suggestions;
   }

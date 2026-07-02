@@ -51,7 +51,10 @@ void main() {
     expect(files, hasLength(2));
     expect(files.first.filename, 'movie.mp4');
     expect(files.first.size, 2048);
-    expect(files.first.lastModified, DateTime(2026));
+    expect(
+      files.first.lastModified,
+      DateTime.fromMillisecondsSinceEpoch(1767225600000),
+    );
     expect(files.last.filename, 'negative.bin');
     expect(files.last.size, 0);
   });

@@ -147,10 +147,9 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
               return LayoutBuilder(
                 builder: (context, constraints) {
                   const maxWidth = 1040.0;
-                  final extraWidth = (constraints.maxWidth - maxWidth).clamp(
-                    0,
-                    double.infinity,
-                  ).toDouble();
+                  final extraWidth = (constraints.maxWidth - maxWidth)
+                      .clamp(0, double.infinity)
+                      .toDouble();
                   final sideInset = extraWidth / 2;
 
                   return CustomScrollView(
@@ -178,16 +177,12 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
                                     style: Theme.of(context)
                                         .textTheme
                                         .titleLarge
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                        ),
+                                        ?.copyWith(fontWeight: FontWeight.w800),
                                   ),
                                 ),
                                 Text(
                                   '${_selectedPaths.length} selected',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .labelLarge
+                                  style: Theme.of(context).textTheme.labelLarge
                                       ?.copyWith(
                                         color: Theme.of(
                                           context,
@@ -549,9 +544,9 @@ class _SelectionSummary extends StatelessWidget {
                 );
                 final label = Text(
                   title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 );
                 final amount = Text(
                   _formatBytes(bytes),

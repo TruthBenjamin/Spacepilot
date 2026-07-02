@@ -30,9 +30,7 @@ final class RecommendationEngine {
         apkBytes += file.size;
       }
 
-      if (!isScreenshot &&
-          !isApk &&
-          file.lastModified.isBefore(unusedBefore)) {
+      if (!isScreenshot && !isApk && file.lastModified.isBefore(unusedBefore)) {
         unusedFileBytes += file.size;
       }
     }
@@ -75,9 +73,7 @@ final class RecommendationEngine {
           actionLabel: 'Review',
           actionTarget: RecommendationActionTarget.scanResults,
         ),
-    ]..sort(
-        (a, b) => b.storageSavingsBytes.compareTo(a.storageSavingsBytes),
-      );
+    ]..sort((a, b) => b.storageSavingsBytes.compareTo(a.storageSavingsBytes));
 
     return recommendations;
   }

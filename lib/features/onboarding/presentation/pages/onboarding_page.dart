@@ -20,7 +20,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
   static const _slides = [
     _Slide(
       title: 'AI that keeps your phone clean & fast',
-      body: 'Find, review and remove junk files, duplicates, and large files easily.',
+      body:
+          'Find, review and remove junk files, duplicates, and large files easily.',
       icon: Icons.cleaning_services_rounded,
     ),
     _Slide(
@@ -30,7 +31,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
     ),
     _Slide(
       title: 'Agentic cleanup insights',
-      body: 'Monitor storage growth, predict shortages, and get safe cleanup suggestions.',
+      body:
+          'Monitor storage growth, predict shortages, and get safe cleanup suggestions.',
       icon: Icons.smart_toy_rounded,
     ),
     _Slide(
@@ -239,11 +241,7 @@ class _Dots extends StatelessWidget {
 }
 
 class _Slide {
-  const _Slide({
-    required this.title,
-    required this.body,
-    required this.icon,
-  });
+  const _Slide({required this.title, required this.body, required this.icon});
 
   final String title;
   final String body;

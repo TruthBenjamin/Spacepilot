@@ -50,7 +50,7 @@ final class CleanupService {
           result.failures[path] = _outsideAllowedRootsMessage;
           continue;
         }
-        if (_isProtectedPath(safePath)) {
+        if (_isProtectedPath(safePath) || _isProtectedPath(path)) {
           result.failures[path] = _protectedPathMessage;
           continue;
         }
@@ -115,7 +115,10 @@ final class CleanupService {
           result.failures[path] = _outsideAllowedRootsMessage;
           continue;
         }
-        if (_isProtectedPath(safePath) || _isCleanupRoot(safePath)) {
+        if (_isProtectedPath(safePath) ||
+            _isProtectedPath(path) ||
+            _isCleanupRoot(safePath) ||
+            _isCleanupRoot(path)) {
           result.failures[path] = _protectedPathMessage;
           continue;
         }
@@ -142,16 +145,25 @@ final class CleanupService {
     if (type != FileSystemEntityType.file) return null;
 
     final resolved = await file.resolveSymbolicLinks();
-    if (!_isAllowedCleanupPath(resolved)) return null;
+    if (!_isAllowedCleanupPath(resolved) &&
+        !_isAllowedCleanupPath(file.absolute.path)) {
+      return null;
+    }
     return resolved;
   }
 
   Future<String?> _safeDirectoryPath(Directory directory) async {
-    final type = await FileSystemEntity.type(directory.path, followLinks: false);
+    final type = await FileSystemEntity.type(
+      directory.path,
+      followLinks: false,
+    );
     if (type != FileSystemEntityType.directory) return null;
 
     final resolved = await directory.resolveSymbolicLinks();
-    if (!_isAllowedCleanupPath(resolved)) return null;
+    if (!_isAllowedCleanupPath(resolved) &&
+        !_isAllowedCleanupPath(directory.absolute.path)) {
+      return null;
+    }
     return resolved;
   }
 

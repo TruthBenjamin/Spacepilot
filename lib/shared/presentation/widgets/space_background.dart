@@ -12,11 +12,7 @@ class SpaceBackground extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF050716),
-            Color(0xFF0A0E24),
-            Color(0xFF120B2F),
-          ],
+          colors: [Color(0xFF050716), Color(0xFF0A0E24), Color(0xFF120B2F)],
         ),
       ),
       child: Stack(
@@ -150,15 +146,18 @@ class _StarFieldPainter extends CustomPainter {
     }
 
     final glow = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          const Color(0xFF7C3AED).withValues(alpha: 0.32),
-          Colors.transparent,
-        ],
-      ).createShader(Rect.fromCircle(
-        center: Offset(size.width * 0.82, size.height * 0.18),
-        radius: size.width * 0.46,
-      ));
+      ..shader =
+          RadialGradient(
+            colors: [
+              const Color(0xFF7C3AED).withValues(alpha: 0.32),
+              Colors.transparent,
+            ],
+          ).createShader(
+            Rect.fromCircle(
+              center: Offset(size.width * 0.82, size.height * 0.18),
+              radius: size.width * 0.46,
+            ),
+          );
     canvas.drawCircle(
       Offset(size.width * 0.82, size.height * 0.18),
       size.width * 0.46,
@@ -234,7 +233,10 @@ class _SpaceBotPainter extends CustomPainter {
     );
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(center.dx - size.width * 0.35, center.dy + size.height * 0.18),
+        center: Offset(
+          center.dx - size.width * 0.35,
+          center.dy + size.height * 0.18,
+        ),
         width: size.width * 0.17,
         height: size.height * 0.32,
       ),
@@ -242,7 +244,10 @@ class _SpaceBotPainter extends CustomPainter {
     );
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(center.dx + size.width * 0.35, center.dy + size.height * 0.18),
+        center: Offset(
+          center.dx + size.width * 0.35,
+          center.dy + size.height * 0.18,
+        ),
         width: size.width * 0.17,
         height: size.height * 0.32,
       ),

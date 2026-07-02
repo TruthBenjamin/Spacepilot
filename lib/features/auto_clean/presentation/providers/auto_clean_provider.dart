@@ -27,7 +27,9 @@ final autoCleanPlanProvider = FutureProvider<AutoCleanPlan>((ref) async {
   final scan = await ref.watch(storageScanProvider.future);
   final duplicateGroups = await ref.watch(duplicateGroupsProvider.future);
 
-  return ref.read(autoCleanRuleEngineProvider).buildPlan(
+  return ref
+      .read(autoCleanRuleEngineProvider)
+      .buildPlan(
         rules: rules,
         files: scan.files,
         duplicateGroups: duplicateGroups,

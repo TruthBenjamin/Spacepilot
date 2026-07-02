@@ -237,9 +237,9 @@ class _AutoCleanPlanCard extends StatelessWidget {
               children: [
                 Text(
                   '$ruleCount active ${ruleCount == 1 ? 'rule' : 'rules'}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 Text(
                   '$fileCount files matched | ${_formatBytes(savingsBytes)} potential savings',
@@ -255,11 +255,7 @@ class _AutoCleanPlanCard extends StatelessWidget {
             if (compact) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  icon,
-                  const SizedBox(height: 12),
-                  details,
-                ],
+                children: [icon, const SizedBox(height: 12), details],
               );
             }
 

@@ -48,3 +48,31 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+val deleteReleaseTestGeneratedPluginRegistrant by tasks.registering {
+    val registrant = layout.projectDirectory.file(
+        "src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java",
+    )
+
+    doLast {
+        val file = registrant.asFile
+        if (!file.exists()) return@doLast
+
+        val contents = file.readText()
+        val pluginRegistrations =
+            Regex("""flutterEngine\.getPlugins\(\)\.add""").findAll(contents).count()
+
+        if (
+            contents.contains("integration_test") &&
+                pluginRegistrations == 1
+        ) {
+            file.delete()
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "compileReleaseJavaWithJavac") {
+        dependsOn(deleteReleaseTestGeneratedPluginRegistrant)
+    }
+}

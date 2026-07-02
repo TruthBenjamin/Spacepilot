@@ -114,9 +114,7 @@ class _SplashPageState extends State<SplashPage>
                           value: 0.78,
                           minHeight: 8,
                           backgroundColor: Color(0xFF1D2545),
-                          valueColor: AlwaysStoppedAnimation(
-                            Color(0xFF9B5CFF),
-                          ),
+                          valueColor: AlwaysStoppedAnimation(Color(0xFF9B5CFF)),
                         ),
                       ),
                       const SizedBox(height: 8),

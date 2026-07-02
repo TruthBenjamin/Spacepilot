@@ -51,8 +51,7 @@ final class ScheduledScanConfig {
     return ScheduledScanConfig(
       enabled: enabled ?? this.enabled,
       frequency: frequency ?? this.frequency,
-      minutesAfterMidnight:
-          minutesAfterMidnight ?? this.minutesAfterMidnight,
+      minutesAfterMidnight: minutesAfterMidnight ?? this.minutesAfterMidnight,
       lastRunAt: clearLastRunAt ? null : lastRunAt ?? this.lastRunAt,
     );
   }

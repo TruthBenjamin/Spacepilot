@@ -37,16 +37,17 @@ final class AnalyticsEngine {
       }
     }
 
-    final categories = categoryStats.entries
-        .map(
-          (entry) => FileCategoryBreakdown(
-            category: entry.key,
-            fileCount: entry.value.fileCount,
-            bytes: entry.value.bytes,
-          ),
-        )
-        .toList(growable: false)
-      ..sort((a, b) => b.bytes.compareTo(a.bytes));
+    final categories =
+        categoryStats.entries
+            .map(
+              (entry) => FileCategoryBreakdown(
+                category: entry.key,
+                fileCount: entry.value.fileCount,
+                bytes: entry.value.bytes,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((a, b) => b.bytes.compareTo(a.bytes));
 
     final duplicates = duplicateGroups.toList(growable: false);
     final largestFiles = [...scannedFiles]
@@ -81,9 +82,16 @@ final class AnalyticsEngine {
     if (['mp3', 'wav', 'm4a', 'aac', 'ogg'].contains(extension)) {
       return FileAnalyticsCategory.audio;
     }
-    if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].contains(
-      extension,
-    )) {
+    if ([
+      'pdf',
+      'doc',
+      'docx',
+      'xls',
+      'xlsx',
+      'ppt',
+      'pptx',
+      'txt',
+    ].contains(extension)) {
       return FileAnalyticsCategory.documents;
     }
     if (['zip', 'rar', '7z', 'tar', 'gz'].contains(extension)) {

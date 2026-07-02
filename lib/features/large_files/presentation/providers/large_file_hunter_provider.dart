@@ -22,16 +22,15 @@ final largeFileThresholdProvider = StateProvider<LargeFileThreshold>((ref) {
 final largeFileHunterProvider = Provider<AsyncValue<List<ScannedFile>>>((ref) {
   final threshold = ref.watch(largeFileThresholdProvider);
   final scannedFiles = ref.watch(
-    storageScanProvider.select(
-      (scan) => scan.whenData((state) => state.files),
-    ),
+    storageScanProvider.select((scan) => scan.whenData((state) => state.files)),
   );
 
   return scannedFiles.whenData((scannedFiles) {
-    final files = scannedFiles
-        .where((file) => file.size > threshold.bytes)
-        .toList(growable: false)
-      ..sort((a, b) => b.size.compareTo(a.size));
+    final files =
+        scannedFiles
+            .where((file) => file.size > threshold.bytes)
+            .toList(growable: false)
+          ..sort((a, b) => b.size.compareTo(a.size));
 
     return files;
   });

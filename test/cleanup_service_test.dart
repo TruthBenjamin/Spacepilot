@@ -5,8 +5,6 @@ import 'package:spacepilot/features/cleanup/data/services/services.dart';
 import 'package:spacepilot/features/duplicates/domain/models/models.dart';
 
 void main() {
-  const service = CleanupService();
-
   test('deleteFiles deletes only explicitly supplied files', () async {
     final root = await Directory.systemTemp.createTemp('cleanup_files_');
     addTearDown(() => root.delete(recursive: true));
@@ -14,6 +12,7 @@ void main() {
     final untouched = await File(
       '${root.path}/untouched.txt',
     ).writeAsString('y');
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
 
     final result = await service.deleteFiles([selected], userConfirmed: true);
 
@@ -42,12 +41,12 @@ void main() {
       allowedRootPaths: [allowedRoot.absolute.path],
     );
 
-    final result = await guardedService.deleteFiles(
-      [allowed, outside],
-      userConfirmed: true,
-    );
+    final result = await guardedService.deleteFiles([
+      allowed,
+      outside,
+    ], userConfirmed: true);
 
-    expect(result.deletedPaths, contains(allowed.absolute.path));
+    expect(result.deletedPaths, contains(_pathEndingWith('/allowed.txt')));
     expect(
       result.failures,
       containsPair(
@@ -63,11 +62,9 @@ void main() {
     final root = await Directory.systemTemp.createTemp('cleanup_confirm_');
     addTearDown(() => root.delete(recursive: true));
     final selected = await File('${root.path}/selected.txt').writeAsString('x');
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
 
-    final result = await service.deleteFiles(
-      [selected],
-      userConfirmed: false,
-    );
+    final result = await service.deleteFiles([selected], userConfirmed: false);
 
     expect(result.deletedCount, 0);
     expect(
@@ -93,10 +90,9 @@ void main() {
       allowedRootPaths: [root.absolute.path],
     );
 
-    final result = await guardedService.deleteFiles(
-      [protectedFile],
-      userConfirmed: true,
-    );
+    final result = await guardedService.deleteFiles([
+      protectedFile,
+    ], userConfirmed: true);
 
     expect(result.deletedCount, 0);
     expect(
@@ -121,6 +117,7 @@ void main() {
       sizeBytes: 4,
       files: [_duplicateFile(original), _duplicateFile(copy)],
     );
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
 
     final result = await service.deleteDuplicates(
       [group],
@@ -139,14 +136,15 @@ void main() {
     final empty = await Directory('${root.path}/empty').create();
     final nonEmpty = await Directory('${root.path}/non-empty').create();
     await File('${nonEmpty.path}/file.txt').writeAsString('content');
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
 
-    final result = await service.deleteEmptyFolders(
-      [empty, nonEmpty],
-      userConfirmed: true,
-    );
+    final result = await service.deleteEmptyFolders([
+      empty,
+      nonEmpty,
+    ], userConfirmed: true);
 
-    expect(result.deletedPaths, contains(empty.absolute.path));
-    expect(result.skippedPaths, contains(nonEmpty.absolute.path));
+    expect(result.deletedPaths, contains(_pathEndingWith('/empty')));
+    expect(result.skippedPaths, contains(_pathEndingWith('/non-empty')));
     expect(await empty.exists(), isFalse);
     expect(await nonEmpty.exists(), isTrue);
   });
@@ -162,10 +160,9 @@ void main() {
       allowedRootPaths: [root.absolute.path],
     );
 
-    final result = await guardedService.deleteEmptyFolders(
-      [root],
-      userConfirmed: true,
-    );
+    final result = await guardedService.deleteEmptyFolders([
+      root,
+    ], userConfirmed: true);
 
     expect(result.deletedCount, 0);
     expect(
@@ -182,11 +179,9 @@ void main() {
     final root = await Directory.systemTemp.createTemp('cleanup_missing_');
     addTearDown(() => root.delete(recursive: true));
     final missing = File('${root.path}/missing.txt');
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
 
-    final result = await service.deleteFiles(
-      [missing],
-      userConfirmed: true,
-    );
+    final result = await service.deleteFiles([missing], userConfirmed: true);
 
     expect(result.deletedCount, 0);
     expect(result.skippedPaths, contains(missing.absolute.path));
@@ -200,5 +195,12 @@ DuplicateFile _duplicateFile(File file) {
     path: file.path,
     sizeBytes: file.lengthSync(),
     lastModified: file.lastModifiedSync(),
+  );
+}
+
+Matcher _pathEndingWith(String suffix) {
+  return predicate<String>(
+    (path) => path.replaceAll('\\', '/').endsWith(suffix),
+    'path ending with $suffix',
   );
 }

@@ -71,11 +71,7 @@ final class AgentCleanupSuggestion {
   final AgentSuggestionPriority priority;
 }
 
-enum AgentSuggestionPriority {
-  low,
-  medium,
-  high,
-}
+enum AgentSuggestionPriority { low, medium, high }
 
 @immutable
 final class AgentReport {

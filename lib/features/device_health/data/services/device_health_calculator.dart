@@ -9,7 +9,9 @@ final class DeviceHealthCalculator {
     required int unusedFileCount,
   }) {
     final normalizedTotalBytes = totalBytes < 0 ? 0 : totalBytes;
-    final normalizedFreeBytes = freeBytes.clamp(0, normalizedTotalBytes).toInt();
+    final normalizedFreeBytes = freeBytes
+        .clamp(0, normalizedTotalBytes)
+        .toInt();
     final freeRatio = normalizedTotalBytes == 0
         ? 0.0
         : normalizedFreeBytes / normalizedTotalBytes;

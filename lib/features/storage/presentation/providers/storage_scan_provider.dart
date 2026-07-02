@@ -18,10 +18,7 @@ final storageScanProvider =
     );
 
 final class StorageScanState {
-  const StorageScanState({
-    required this.files,
-    required this.hasScanned,
-  });
+  const StorageScanState({required this.files, required this.hasScanned});
 
   const StorageScanState.initial() : files = const [], hasScanned = false;
 

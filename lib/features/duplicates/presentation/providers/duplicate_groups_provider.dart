@@ -10,7 +10,9 @@ final duplicateDetectorServiceProvider = Provider<DuplicateDetectorService>(
   (ref) => const DuplicateDetectorService(),
 );
 
-final duplicateGroupsProvider = FutureProvider<List<DuplicateGroup>>((ref) async {
+final duplicateGroupsProvider = FutureProvider<List<DuplicateGroup>>((
+  ref,
+) async {
   final scan = await ref.watch(storageScanProvider.future);
   if (!scan.hasScanned || scan.files.isEmpty) return const [];
 
