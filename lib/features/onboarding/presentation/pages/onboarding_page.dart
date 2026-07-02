@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/services/onboarding_preferences_service.dart';
 import '../../../../routes/app_routes.dart';
 import '../../../../shared/presentation/widgets/space_background.dart';
 
@@ -15,7 +16,10 @@ class OnboardingPage extends StatefulWidget {
 
 class _OnboardingPageState extends State<OnboardingPage> {
   final PageController _controller = PageController();
+  final OnboardingPreferencesService _preferences =
+      OnboardingPreferencesService();
   int _index = 0;
+  bool _isFinishing = false;
 
   static const _slides = [
     _Slide(
@@ -50,7 +54,15 @@ class _OnboardingPageState extends State<OnboardingPage> {
     super.dispose();
   }
 
-  void _finish() => context.go(AppRoutes.dashboard);
+  Future<void> _finish() async {
+    if (_isFinishing) return;
+    setState(() => _isFinishing = true);
+
+    await _preferences.setOnboardingCompleted();
+    if (!mounted) return;
+
+    context.go(AppRoutes.dashboard);
+  }
 
   void _next() {
     if (_isLast) {
@@ -99,7 +111,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     _Dots(count: _slides.length, active: _index),
                     const Spacer(),
                     FilledButton(
-                      onPressed: _next,
+                      onPressed: _isFinishing ? null : _next,
                       child: Text(_isLast ? 'Start' : 'Next'),
                     ),
                   ],

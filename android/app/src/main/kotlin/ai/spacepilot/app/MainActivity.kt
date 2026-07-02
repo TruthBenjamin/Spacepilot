@@ -26,6 +26,7 @@ class MainActivity : FlutterActivity() {
     private var permissionChannel: MethodChannel? = null
     private var agentBackgroundChannel: MethodChannel? = null
     private var storageStatsChannel: MethodChannel? = null
+    private var appPreferencesChannel: MethodChannel? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingPermissionKind: PermissionKind? = null
 
@@ -84,6 +85,29 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        appPreferencesChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            APP_PREFERENCES_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hasCompletedOnboarding" -> {
+                        result.success(
+                            appPreferences().getBoolean(ONBOARDING_COMPLETED_KEY, false),
+                        )
+                    }
+                    "setOnboardingCompleted" -> {
+                        appPreferences()
+                            .edit()
+                            .putBoolean(ONBOARDING_COMPLETED_KEY, true)
+                            .apply()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -98,6 +122,8 @@ class MainActivity : FlutterActivity() {
         agentBackgroundChannel = null
         storageStatsChannel?.setMethodCallHandler(null)
         storageStatsChannel = null
+        appPreferencesChannel?.setMethodCallHandler(null)
+        appPreferencesChannel = null
         permissionChannel?.setMethodCallHandler(null)
         permissionChannel = null
         scannerChannel?.setMethodCallHandler(null)
@@ -320,6 +346,8 @@ class MainActivity : FlutterActivity() {
         }.getOrDefault(false)
     }
 
+    private fun appPreferences() = getSharedPreferences(APP_PREFS, Context.MODE_PRIVATE)
+
     private enum class PermissionKind {
         STORAGE,
         MEDIA,
@@ -330,6 +358,9 @@ class MainActivity : FlutterActivity() {
         const val PERMISSIONS_CHANNEL = "ai.spacepilot.app/permissions"
         const val AGENT_BACKGROUND_CHANNEL = "ai.spacepilot.app/agent_background"
         const val STORAGE_STATS_CHANNEL = "ai.spacepilot.app/storage_stats"
+        const val APP_PREFERENCES_CHANNEL = "ai.spacepilot.app/preferences"
+        const val APP_PREFS = "spacepilot_app_preferences"
+        const val ONBOARDING_COMPLETED_KEY = "onboarding_completed"
         const val STORAGE_PERMISSION_REQUEST = 4102
         const val MEDIA_PERMISSION_REQUEST = 4103
         const val AGENT_MONITORING_JOB_ID = 4201

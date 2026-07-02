@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../onboarding/data/services/onboarding_preferences_service.dart';
 import '../../../../routes/app_routes.dart';
 import '../../../../shared/presentation/widgets/space_background.dart';
 
@@ -16,6 +17,8 @@ class SplashPage extends StatefulWidget {
 class _SplashPageState extends State<SplashPage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  final OnboardingPreferencesService _preferences =
+      OnboardingPreferencesService();
   Timer? _navigationTimer;
 
   @override
@@ -27,7 +30,16 @@ class _SplashPageState extends State<SplashPage>
     )..repeat(reverse: true);
     _navigationTimer = Timer(
       const Duration(milliseconds: 2600),
-      () => mounted ? context.go(AppRoutes.onboarding) : null,
+      _navigateAfterSplash,
+    );
+  }
+
+  Future<void> _navigateAfterSplash() async {
+    final completedOnboarding = await _preferences.hasCompletedOnboarding();
+    if (!mounted) return;
+
+    context.go(
+      completedOnboarding ? AppRoutes.dashboard : AppRoutes.onboarding,
     );
   }
 
