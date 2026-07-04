@@ -116,7 +116,7 @@ class _DuplicatesPageState extends ConsumerState<DuplicatesPage> {
                   icon: Icons.copy_all_rounded,
                   title: 'Scan to uncover duplicate files',
                   message:
-                      'SpacePilot compares file contents so matching files can be selected safely.',
+                      'SpacePilot uses SHA256 hashes to compare images, videos, documents, and audio.',
                   actionLabel: 'Run storage scan',
                   onAction: _runScan,
                 );
@@ -293,7 +293,7 @@ class _SummaryCard extends StatelessWidget {
             ),
           ),
           Text(
-            'total storage wasted',
+            'recoverable storage',
             style: textTheme.bodyMedium?.copyWith(
               color: Colors.white.withValues(alpha: 0.76),
             ),
@@ -576,6 +576,14 @@ class _SelectionSummary extends StatelessWidget {
                   ],
                 );
               },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Nothing is deleted unless you select files and confirm.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSecondaryContainer.withValues(alpha: 0.72),
+              ),
             ),
             const SizedBox(height: 8),
             SizedBox(

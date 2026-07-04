@@ -6,25 +6,27 @@ import 'package:spacepilot/features/storage/domain/models/scanned_file.dart';
 import 'package:spacepilot/features/storage/presentation/providers/storage_scan_provider.dart';
 
 void main() {
-  Widget buildPage() {
+  Widget buildPage({List<ScannedFile>? files}) {
     return ProviderScope(
       overrides: [
         storageScanProvider.overrideWithBuild(
           (ref, controller) => StorageScanState(
             hasScanned: true,
-            files: [
-              _file('tiny.txt', '/downloads/tiny.txt', 10),
-              _file(
-                'movie.mp4',
-                '/storage/emulated/0/Movies/movie.mp4',
-                800 * 1024 * 1024,
-              ),
-              _file(
-                'archive.zip',
-                '/storage/emulated/0/Download/archive.zip',
-                250 * 1024 * 1024,
-              ),
-            ],
+            files:
+                files ??
+                [
+                  _file('tiny.txt', '/downloads/tiny.txt', 10),
+                  _file(
+                    'movie.mp4',
+                    '/storage/emulated/0/Movies/movie.mp4',
+                    800 * 1024 * 1024,
+                  ),
+                  _file(
+                    'archive.zip',
+                    '/storage/emulated/0/Download/archive.zip',
+                    250 * 1024 * 1024,
+                  ),
+                ],
           ),
         ),
       ],
@@ -56,6 +58,11 @@ void main() {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
 
+    await Scrollable.ensureVisible(
+      tester.element(find.text('archive.zip')),
+      alignment: 0.3,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('archive.zip'));
     await tester.pump();
     final deleteButton = find.widgetWithText(FilledButton, 'Delete selected');
@@ -79,6 +86,93 @@ void main() {
 
     expect(find.text('Delete selected large files?'), findsNothing);
     expect(find.text('1 selected for deletion'), findsOneWidget);
+  });
+
+  testWidgets('deletes only selected files visible under active filters', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPage(
+        files: [
+          _file(
+            'movie.mp4',
+            '/storage/emulated/0/Movies/movie.mp4',
+            800 * 1024 * 1024,
+          ),
+          _file(
+            'archive.zip',
+            '/storage/emulated/0/Download/archive.zip',
+            250 * 1024 * 1024,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('movie.mp4'));
+    await tester.pump();
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -900));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'archive');
+    await tester.pumpAndSettle();
+    await Scrollable.ensureVisible(
+      tester.element(find.text('archive.zip')),
+      alignment: 0.3,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('archive.zip'));
+    await tester.pump();
+
+    final deleteButton = find.widgetWithText(FilledButton, 'Delete selected');
+    await tester.scrollUntilVisible(
+      deleteButton,
+      250,
+      scrollable: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    await tester.tap(deleteButton);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('permanently delete 1 file'), findsOneWidget);
+  });
+
+  testWidgets('paginates large result sets to keep the page responsive', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildPage(
+        files: [
+          for (var index = 0; index < 75; index++)
+            _file(
+              'large-$index.bin',
+              '/storage/emulated/0/Download/large-$index.bin',
+              (200 + index) * 1024 * 1024,
+            ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('75 files found'), findsOneWidget);
+    expect(find.text('large-74.bin'), findsOneWidget);
+    expect(find.text('large-24.bin'), findsNothing);
+
+    final loadMore = find.widgetWithText(OutlinedButton, 'Load more (50 of 75)');
+    await tester.scrollUntilVisible(
+      loadMore,
+      600,
+      scrollable: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ),
+    );
+    await tester.tap(loadMore);
+    await tester.pumpAndSettle();
+
+    expect(find.text('large-24.bin'), findsOneWidget);
   });
 }
 

@@ -13,6 +13,7 @@ void main() {
   test('largeFileHunterProvider filters by threshold and sorts descending', () {
     final files = [
       _file('small.zip', '/downloads/small.zip', 99 * 1024 * 1024),
+      _file('quarter.zip', '/downloads/quarter.zip', 250 * 1024 * 1024 + 1),
       _file('medium.zip', '/downloads/medium.zip', 500 * 1024 * 1024 + 1),
       _file('huge.zip', '/downloads/huge.zip', 1024 * 1024 * 1024 + 1),
     ];
@@ -24,6 +25,53 @@ void main() {
 
     final largeFiles = container.read(largeFileHunterProvider).requireValue;
     expect(largeFiles.map((file) => file.filename), ['huge.zip', 'medium.zip']);
+  });
+
+  test('largeFileHunterProvider supports 250 MB threshold accurately', () {
+    final files = [
+      _file('at-limit.zip', '/downloads/at-limit.zip', 250 * 1024 * 1024),
+      _file(
+        'over-limit.zip',
+        '/downloads/over-limit.zip',
+        250 * 1024 * 1024 + 1,
+      ),
+      _file('largest.zip', '/downloads/largest.zip', 600 * 1024 * 1024),
+    ];
+    final container = _containerWithScan(files);
+    addTearDown(container.dispose);
+
+    container.read(largeFileThresholdProvider.notifier).state =
+        LargeFileThreshold.mb250;
+
+    final largeFiles = container.read(largeFileHunterProvider).requireValue;
+    expect(largeFiles.map((file) => file.filename), [
+      'largest.zip',
+      'over-limit.zip',
+    ]);
+  });
+
+  test('pagedLargeFileHunterProvider returns fixed-size pages', () {
+    final files = [
+      for (var index = 0; index < 75; index++)
+        _file(
+          'large-$index.bin',
+          '/downloads/large-$index.bin',
+          (200 + index) * 1024 * 1024,
+        ),
+    ];
+    final container = _containerWithScan(files);
+    addTearDown(container.dispose);
+
+    final firstPage = container.read(pagedLargeFileHunterProvider).requireValue;
+    expect(firstPage.files, hasLength(largeFilePageSize));
+    expect(firstPage.totalFiles, 75);
+    expect(firstPage.hasNextPage, isTrue);
+
+    container.read(largeFilePageProvider.notifier).state = 1;
+
+    final secondPage = container.read(pagedLargeFileHunterProvider).requireValue;
+    expect(secondPage.files, hasLength(25));
+    expect(secondPage.hasNextPage, isFalse);
   });
 
   test('duplicateGroupsProvider returns empty before any scan', () async {

@@ -30,7 +30,11 @@ enum _LargeFileKind {
   all('All', Icons.all_inbox_rounded),
   video('Videos', Icons.movie_filter_rounded),
   image('Images', Icons.image_rounded),
-  archive('Archives', Icons.archive_rounded),
+  audio('Audio', Icons.audio_file_rounded),
+  document('Documents', Icons.description_rounded),
+  apk('APKs', Icons.android_rounded),
+  zip('ZIP files', Icons.archive_rounded),
+  archive('Archives', Icons.folder_zip_rounded),
   download('Downloads', Icons.download_rounded),
   other('Other', Icons.insert_drive_file_outlined);
 
@@ -55,12 +59,16 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
   _LargeFileKind _kind = _LargeFileKind.all;
   String _query = '';
   bool _isDeleting = false;
+  int _visiblePages = 1;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() => _query = _searchController.text.trim().toLowerCase());
+      setState(() {
+        _query = _searchController.text.trim().toLowerCase();
+        _visiblePages = 1;
+      });
     });
   }
 
@@ -218,45 +226,65 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
                       }
 
                       return largeFiles.when(
-                        data: (files) => _LargeFileSliverList(
-                          files: _visibleFiles(files),
-                          totalFiles: files.length,
-                          threshold: threshold,
-                          selectedPaths: _selectedPaths,
-                          isDeleting: _isDeleting,
-                          padding: resultPadding,
-                          onFileChanged: _setFileSelected,
-                          onFileDetails: (file) => _showFileDetails(
-                            context,
-                            file,
-                          ),
-                          onDeleteSelected: () => deleteSelected(files),
-                          history: _history,
-                          stats: _LargeFileStats(files: files),
-                          filters: _FilterPanel(
-                            searchController: _searchController,
-                            selectedKind: _kind,
-                            selectedSort: _sort,
-                            onKindChanged: (kind) =>
-                                setState(() => _kind = kind),
-                            onSortChanged: (sort) =>
-                                setState(() => _sort = sort),
-                            onClear: () {
+                        data: (files) {
+                          final visibleFiles = _visibleFiles(files);
+                          final visibleLimit =
+                              (_visiblePages * largeFilePageSize)
+                                  .clamp(0, visibleFiles.length)
+                                  .toInt();
+                          final pagedFiles = visibleFiles
+                              .take(visibleLimit)
+                              .toList(growable: false);
+                          return _LargeFileSliverList(
+                            files: pagedFiles,
+                            totalFiles: files.length,
+                            matchingFiles: visibleFiles.length,
+                            threshold: threshold,
+                            selectedPaths: _selectedPaths,
+                            isDeleting: _isDeleting,
+                            padding: resultPadding,
+                            onFileChanged: _setFileSelected,
+                            onFileDetails: (file) =>
+                                _showFileDetails(context, file),
+                            onDeleteSelected: () => deleteSelected(pagedFiles),
+                            history: _history,
+                            stats: _LargeFileStats(files: files),
+                            filters: _FilterPanel(
+                              searchController: _searchController,
+                              selectedKind: _kind,
+                              selectedSort: _sort,
+                              onKindChanged: (kind) =>
+                                  setState(() {
+                                    _kind = kind;
+                                    _visiblePages = 1;
+                                  }),
+                              onSortChanged: (sort) =>
+                                  setState(() {
+                                    _sort = sort;
+                                    _visiblePages = 1;
+                                  }),
+                              onClear: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _kind = _LargeFileKind.all;
+                                  _sort = _LargeFileSort.largest;
+                                  _visiblePages = 1;
+                                });
+                              },
+                            ),
+                            onClearFilters: () {
                               _searchController.clear();
                               setState(() {
                                 _kind = _LargeFileKind.all;
                                 _sort = _LargeFileSort.largest;
+                                _visiblePages = 1;
                               });
                             },
-                          ),
-                          onClearFilters: () {
-                            _searchController.clear();
-                            setState(() {
-                              _kind = _LargeFileKind.all;
-                              _sort = _LargeFileSort.largest;
-                            });
-                          },
-                        ),
+                            hasMore: pagedFiles.length < visibleFiles.length,
+                            onLoadMore: () =>
+                                setState(() => _visiblePages += 1),
+                          );
+                        },
                         error: (error, _) => SliverPadding(
                           padding: resultPadding,
                           sliver: SliverToBoxAdapter(
@@ -305,12 +333,14 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
   }
 
   List<ScannedFile> _visibleFiles(List<ScannedFile> files) {
-    final visible = files.where((file) {
-      if (!_matchesKind(file, _kind)) return false;
-      if (_query.isEmpty) return true;
-      return file.filename.toLowerCase().contains(_query) ||
-          file.path.toLowerCase().contains(_query);
-    }).toList(growable: false);
+    final visible = files
+        .where((file) {
+          if (!_matchesKind(file, _kind)) return false;
+          if (_query.isEmpty) return true;
+          return file.filename.toLowerCase().contains(_query) ||
+              file.path.toLowerCase().contains(_query);
+        })
+        .toList(growable: false);
 
     visible.sort((a, b) {
       return switch (_sort) {
@@ -459,33 +489,50 @@ class _LargeFileStats extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 700 ? 4 : 2;
-        return GridView.count(
-          crossAxisCount: columns,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-          childAspectRatio: constraints.maxWidth >= 700 ? 1.55 : 1.4,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+        final spacing = 10.0;
+        final cardWidth =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+        final cardHeight = constraints.maxWidth >= 700 ? 106.0 : 116.0;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
           children: [
-            _StatCard(
-              icon: Icons.storage_rounded,
-              label: 'Reviewable',
-              value: _formatBytes(totalBytes),
+            SizedBox(
+              width: cardWidth,
+              height: cardHeight,
+              child: _StatCard(
+                icon: Icons.storage_rounded,
+                label: 'Reviewable',
+                value: _formatBytes(totalBytes),
+              ),
             ),
-            _StatCard(
-              icon: Icons.vertical_align_top_rounded,
-              label: 'Largest',
-              value: _formatBytes(largestBytes),
+            SizedBox(
+              width: cardWidth,
+              height: cardHeight,
+              child: _StatCard(
+                icon: Icons.vertical_align_top_rounded,
+                label: 'Largest',
+                value: _formatBytes(largestBytes),
+              ),
             ),
-            _StatCard(
-              icon: Icons.folder_special_rounded,
-              label: 'Files',
-              value: '${files.length}',
+            SizedBox(
+              width: cardWidth,
+              height: cardHeight,
+              child: _StatCard(
+                icon: Icons.folder_special_rounded,
+                label: 'Files',
+                value: '${files.length}',
+              ),
             ),
-            _StatCard(
-              icon: Icons.movie_filter_rounded,
-              label: 'Videos',
-              value: '$videoCount',
+            SizedBox(
+              width: cardWidth,
+              height: cardHeight,
+              child: _StatCard(
+                icon: Icons.movie_filter_rounded,
+                label: 'Videos',
+                value: '$videoCount',
+              ),
             ),
           ],
         );
@@ -613,10 +660,7 @@ class _FilterPanel extends StatelessWidget {
                     ),
                     items: [
                       for (final sort in _LargeFileSort.values)
-                        DropdownMenuItem(
-                          value: sort,
-                          child: Text(sort.label),
-                        ),
+                        DropdownMenuItem(value: sort, child: Text(sort.label)),
                     ],
                     onChanged: (sort) {
                       if (sort != null) onSortChanged(sort);
@@ -642,6 +686,7 @@ class _LargeFileSliverList extends StatelessWidget {
   const _LargeFileSliverList({
     required this.files,
     required this.totalFiles,
+    required this.matchingFiles,
     required this.threshold,
     required this.selectedPaths,
     required this.isDeleting,
@@ -653,10 +698,13 @@ class _LargeFileSliverList extends StatelessWidget {
     required this.stats,
     required this.filters,
     required this.onClearFilters,
+    required this.hasMore,
+    required this.onLoadMore,
   });
 
   final List<ScannedFile> files;
   final int totalFiles;
+  final int matchingFiles;
   final LargeFileThreshold threshold;
   final ValueListenable<Set<String>> selectedPaths;
   final bool isDeleting;
@@ -668,6 +716,8 @@ class _LargeFileSliverList extends StatelessWidget {
   final Widget stats;
   final Widget filters;
   final VoidCallback onClearFilters;
+  final bool hasMore;
+  final VoidCallback onLoadMore;
 
   @override
   Widget build(BuildContext context) {
@@ -685,7 +735,7 @@ class _LargeFileSliverList extends StatelessWidget {
       );
     }
 
-    if (files.isEmpty) {
+    if (matchingFiles == 0) {
       return SliverPadding(
         padding: padding,
         sliver: SliverToBoxAdapter(
@@ -714,16 +764,16 @@ class _LargeFileSliverList extends StatelessWidget {
         return SliverPadding(
           padding: padding,
           sliver: SliverList.builder(
-            itemCount: files.length + 6,
+            itemCount: files.length + (hasMore ? 7 : 6),
             itemBuilder: (context, index) {
               if (index == 0) {
                 return Row(
                   children: [
                     Expanded(
                       child: Text(
-                        totalFiles == files.length
-                            ? '${files.length} files found'
-                            : '${files.length} of $totalFiles files found',
+                        totalFiles == matchingFiles
+                            ? '$matchingFiles files found'
+                            : '$matchingFiles of $totalFiles files found',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
@@ -742,7 +792,16 @@ class _LargeFileSliverList extends StatelessWidget {
               if (index == 1) return const SizedBox(height: 10);
 
               final fileIndex = index - 2;
-              if (fileIndex == files.length) {
+              if (hasMore && fileIndex == files.length) {
+                return _LoadMoreLargeFilesCard(
+                  visibleCount: files.length,
+                  totalCount: matchingFiles,
+                  onLoadMore: onLoadMore,
+                );
+              }
+
+              final footerIndex = fileIndex - (hasMore ? 1 : 0);
+              if (footerIndex == files.length) {
                 return _DeleteSelectionCard(
                   selectedCount: selectedCount,
                   selectedBytes: selectedBytes,
@@ -750,23 +809,26 @@ class _LargeFileSliverList extends StatelessWidget {
                   onDelete: onDeleteSelected,
                 );
               }
-              if (fileIndex == files.length + 1) {
+              if (footerIndex == files.length + 1) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: _CleanupHistoryCard(history: history),
                 );
               }
-              if (fileIndex == files.length + 2) {
+              if (footerIndex == files.length + 2) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: filters,
                 );
               }
-              if (fileIndex == files.length + 3) {
+              if (footerIndex == files.length + 3) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: stats,
                 );
+              }
+              if (footerIndex >= files.length) {
+                return const SizedBox.shrink();
               }
 
               final file = files[fileIndex];
@@ -817,7 +879,11 @@ class _LargeFileCard extends StatelessWidget {
         ),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(file.path, maxLines: 2, overflow: TextOverflow.ellipsis),
+          child: Text(
+            '${file.path}\nModified ${_formatDate(file.lastModified)}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
         trailing: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 116),
@@ -855,13 +921,91 @@ class _LargeFileCard extends StatelessWidget {
               value: selected,
               onChanged: (value) => onChanged(value ?? false),
             ),
-            CircleAvatar(
-              backgroundColor: colorScheme.secondaryContainer,
-              foregroundColor: colorScheme.onSecondaryContainer,
-              child: const Icon(Icons.insert_drive_file_outlined),
+            _FilePreview(
+              file: file,
+              colorScheme: colorScheme,
             ),
+            const SizedBox(width: 4),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FilePreview extends StatelessWidget {
+  const _FilePreview({required this.file, required this.colorScheme});
+
+  final ScannedFile file;
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final previewPath = file.previewPath;
+    final previewType = file.previewType;
+
+    if (!kIsWeb && previewPath != null && previewType == 'image') {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox.square(
+          dimension: 42,
+          child: Image.file(
+            File(previewPath),
+            fit: BoxFit.cover,
+            cacheWidth: 96,
+            errorBuilder: (_, _, _) => _PreviewIcon(
+              icon: _iconForFile(file),
+              colorScheme: colorScheme,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _PreviewIcon(icon: _iconForFile(file), colorScheme: colorScheme);
+  }
+}
+
+class _PreviewIcon extends StatelessWidget {
+  const _PreviewIcon({required this.icon, required this.colorScheme});
+
+  final IconData icon;
+  final ColorScheme colorScheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 42,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colorScheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: colorScheme.onSecondaryContainer),
+      ),
+    );
+  }
+}
+
+class _LoadMoreLargeFilesCard extends StatelessWidget {
+  const _LoadMoreLargeFilesCard({
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onLoadMore,
+  });
+
+  final int visibleCount;
+  final int totalCount;
+  final VoidCallback onLoadMore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 10),
+      child: OutlinedButton.icon(
+        onPressed: onLoadMore,
+        icon: const Icon(Icons.expand_more_rounded),
+        label: Text('Load more ($visibleCount of $totalCount)'),
       ),
     );
   }
@@ -986,9 +1130,9 @@ class _CleanupHistoryCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Text(
                   'Cleanup history',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ],
             ),
@@ -1320,11 +1464,18 @@ bool _matchesKind(ScannedFile file, _LargeFileKind kind) {
     _LargeFileKind.all => true,
     _LargeFileKind.video => _videoExtensions.contains(extension),
     _LargeFileKind.image => _imageExtensions.contains(extension),
+    _LargeFileKind.audio => _audioExtensions.contains(extension),
+    _LargeFileKind.document => _documentExtensions.contains(extension),
+    _LargeFileKind.apk => extension == 'apk',
+    _LargeFileKind.zip => extension == 'zip',
     _LargeFileKind.archive => _archiveExtensions.contains(extension),
     _LargeFileKind.download => normalizedPath.contains('/download/'),
     _LargeFileKind.other =>
       !_videoExtensions.contains(extension) &&
           !_imageExtensions.contains(extension) &&
+          !_audioExtensions.contains(extension) &&
+          !_documentExtensions.contains(extension) &&
+          extension != 'apk' &&
           !_archiveExtensions.contains(extension) &&
           !normalizedPath.contains('/download/'),
   };
@@ -1333,9 +1484,21 @@ bool _matchesKind(ScannedFile file, _LargeFileKind kind) {
 _LargeFileKind _kindForFile(ScannedFile file) {
   if (_matchesKind(file, _LargeFileKind.video)) return _LargeFileKind.video;
   if (_matchesKind(file, _LargeFileKind.image)) return _LargeFileKind.image;
+  if (_matchesKind(file, _LargeFileKind.audio)) return _LargeFileKind.audio;
+  if (_matchesKind(file, _LargeFileKind.document)) {
+    return _LargeFileKind.document;
+  }
+  if (_matchesKind(file, _LargeFileKind.apk)) return _LargeFileKind.apk;
+  if (_matchesKind(file, _LargeFileKind.zip)) return _LargeFileKind.zip;
   if (_matchesKind(file, _LargeFileKind.archive)) return _LargeFileKind.archive;
-  if (_matchesKind(file, _LargeFileKind.download)) return _LargeFileKind.download;
+  if (_matchesKind(file, _LargeFileKind.download)) {
+    return _LargeFileKind.download;
+  }
   return _LargeFileKind.other;
+}
+
+IconData _iconForFile(ScannedFile file) {
+  return _kindForFile(file).icon;
 }
 
 String _extension(String filename) {
@@ -1364,11 +1527,32 @@ const Set<String> _imageExtensions = {
   'webp',
 };
 
-const Set<String> _archiveExtensions = {
-  '7z',
-  'apk',
-  'gz',
-  'rar',
-  'tar',
-  'zip',
+const Set<String> _audioExtensions = {
+  'aac',
+  'flac',
+  'm4a',
+  'mp3',
+  'ogg',
+  'opus',
+  'wav',
+  'wma',
 };
+
+const Set<String> _documentExtensions = {
+  'csv',
+  'doc',
+  'docx',
+  'epub',
+  'odp',
+  'ods',
+  'odt',
+  'pdf',
+  'ppt',
+  'pptx',
+  'rtf',
+  'txt',
+  'xls',
+  'xlsx',
+};
+
+const Set<String> _archiveExtensions = {'7z', 'gz', 'rar', 'tar', 'zip'};

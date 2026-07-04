@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../features/storage/domain/models/storage_stats.dart';
 import '../../../../features/storage/presentation/providers/device_storage_provider.dart';
 import '../../../../features/storage/presentation/providers/storage_scan_provider.dart';
 import '../../../../routes/app_navigation.dart';
+import '../../../../routes/app_routes.dart';
 
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({super.key});
@@ -18,7 +20,7 @@ class DashboardPage extends ConsumerWidget {
 
     Future<void> optimize() async {
       HapticFeedback.mediumImpact();
-      await context.pushScanResults();
+      context.goToScanResults();
     }
 
     return Scaffold(
@@ -28,39 +30,43 @@ class DashboardPage extends ConsumerWidget {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
-            child: RefreshIndicator(
-              color: const Color(0xFF2F80FF),
-              backgroundColor: const Color(0xFF1B1B1B),
-              onRefresh: () async {
-                ref.invalidate(deviceStorageStatsProvider);
-                ref.invalidate(deviceStorageStatsWithHealthProvider);
-              },
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                    sliver: SliverList.list(
-                      children: [
-                        const _DashboardTopBar(),
-                        const SizedBox(height: 24),
-                        storageStats.when(
-                          data: (stats) => _StorageHero(
-                            stats: stats,
-                            isScanning: scanState.isLoading,
-                            onOptimize: optimize,
-                          ),
-                          error: (error, _) => _StorageHero.unavailable(
-                            isScanning: scanState.isLoading,
-                            onOptimize: optimize,
-                          ),
-                          loading: () => _StorageHero.loading(
-                            isScanning: scanState.isLoading,
-                            onOptimize: optimize,
-                          ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxHeight < 760;
+                final horizontalPadding = compact ? 18.0 : 22.0;
+
+                return Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    compact ? 8 : 14,
+                    horizontalPadding,
+                    compact ? 10 : 16,
+                  ),
+                  child: Column(
+                    children: [
+                      const _DashboardTopBar(),
+                      SizedBox(height: compact ? 8 : 14),
+                      storageStats.when(
+                        data: (stats) => _StorageHero(
+                          stats: stats,
+                          isScanning: scanState.isLoading,
+                          onOptimize: optimize,
+                          compact: compact,
                         ),
-                        const SizedBox(height: 34),
-                        storageStats.when(
+                        error: (error, _) => _StorageHero.unavailable(
+                          isScanning: scanState.isLoading,
+                          onOptimize: optimize,
+                          compact: compact,
+                        ),
+                        loading: () => _StorageHero.loading(
+                          isScanning: scanState.isLoading,
+                          onOptimize: optimize,
+                          compact: compact,
+                        ),
+                      ),
+                      SizedBox(height: compact ? 10 : 14),
+                      Expanded(
+                        child: storageStats.when(
                           data: (stats) =>
                               _FeatureGrid(stats: stats, scanState: scanState),
                           error: (error, _) =>
@@ -68,11 +74,11 @@ class DashboardPage extends ConsumerWidget {
                           loading: () =>
                               _FeatureGrid(stats: null, scanState: scanState),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ),
@@ -86,37 +92,82 @@ class _DashboardTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Builder(
-          builder: (context) => _DotIconButton(
-            tooltip: 'Menu',
-            icon: Icons.menu_rounded,
-            hasBadge: true,
-            onPressed: Scaffold.of(context).openDrawer,
-          ),
-        ),
-        const SizedBox(width: 14),
-        TextButton.icon(
-          onPressed: () =>
-              _showHomeMessage(context, 'Upgrade options are coming soon.'),
-          style: TextButton.styleFrom(
-            backgroundColor: const Color(0xFF421121),
-            foregroundColor: const Color(0xFFFF5D73),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          Builder(
+            builder: (context) => _DotIconButton(
+              tooltip: 'Menu',
+              icon: Icons.menu_rounded,
+              hasBadge: true,
+              onPressed: Scaffold.of(context).openDrawer,
             ),
           ),
-          icon: const Icon(Icons.arrow_upward_rounded, size: 16),
-          label: const Text(
-            'Upgrade',
-            style: TextStyle(fontWeight: FontWeight.w800),
+          const SizedBox(width: 10),
+          _VersionButton(onPressed: () => _showVersionSheet(context)),
+          const Spacer(),
+          _NewsButton(onPressed: () => _showNewsSheet(context)),
+        ],
+      ),
+    );
+  }
+}
+
+class _VersionButton extends StatelessWidget {
+  const _VersionButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        backgroundColor: const Color(0xFF331124),
+        foregroundColor: const Color(0xFFFF6A88),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+      ),
+      icon: const Icon(Icons.system_update_alt_rounded, size: 16),
+      label: const Text(
+        'Update',
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+    );
+  }
+}
+
+class _NewsButton extends StatelessWidget {
+  const _NewsButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(12),
+      child: Ink(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFFB12A), Color(0xFFFF5F35), Color(0xFF246BFF)],
           ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFF7A2F).withValues(alpha: 0.24),
+              blurRadius: 18,
+              spreadRadius: -4,
+            ),
+          ],
         ),
-        const Spacer(),
-        _NotesButton(onPressed: context.pushSettings),
-      ],
+        child: const Icon(Icons.newspaper_rounded, color: Colors.white),
+      ),
     );
   }
 }
@@ -126,12 +177,14 @@ class _StorageHero extends StatelessWidget {
     required this.stats,
     required this.isScanning,
     required this.onOptimize,
+    required this.compact,
   }) : label = null,
        score = null;
 
   const _StorageHero.loading({
     required this.isScanning,
     required this.onOptimize,
+    required this.compact,
   }) : stats = null,
        label = 'Reading device storage...',
        score = null;
@@ -139,6 +192,7 @@ class _StorageHero extends StatelessWidget {
   const _StorageHero.unavailable({
     required this.isScanning,
     required this.onOptimize,
+    required this.compact,
   }) : stats = null,
        label = 'Storage details unavailable',
        score = 80;
@@ -148,6 +202,7 @@ class _StorageHero extends StatelessWidget {
   final int? score;
   final bool isScanning;
   final Future<void> Function() onOptimize;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -158,20 +213,27 @@ class _StorageHero extends StatelessWidget {
 
     return Column(
       children: [
-        _ShieldScore(score: resolvedScore, color: status.color),
-        const SizedBox(height: 18),
+        _ShieldScore(
+          score: resolvedScore,
+          color: status.color,
+          size: compact ? 146 : 174,
+        ),
+        SizedBox(height: compact ? 8 : 11),
         Text(
           isScanning ? 'Detecting unused files...' : statusText,
           textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: const Color(0xFF8F8F8F),
-            fontWeight: FontWeight.w500,
+            color: const Color(0xFFA5A5A5),
+            fontSize: compact ? 14 : 16,
+            fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 22),
+        SizedBox(height: compact ? 10 : 14),
         SizedBox(
-          width: 226,
-          height: 62,
+          width: compact ? 214 : 236,
+          height: compact ? 50 : 56,
           child: FilledButton(
             onPressed: isScanning ? null : onOptimize,
             style: FilledButton.styleFrom(
@@ -179,7 +241,7 @@ class _StorageHero extends StatelessWidget {
               disabledBackgroundColor: const Color(0xFF1B4C93),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(25),
               ),
             ),
             child: isScanning
@@ -190,9 +252,12 @@ class _StorageHero extends StatelessWidget {
                       color: Colors.white,
                     ),
                   )
-                : const Text(
+                : Text(
                     'Optimize',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                    style: TextStyle(
+                      fontSize: compact ? 17 : 19,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
           ),
         ),
@@ -202,18 +267,23 @@ class _StorageHero extends StatelessWidget {
 }
 
 class _ShieldScore extends StatelessWidget {
-  const _ShieldScore({required this.score, required this.color});
+  const _ShieldScore({
+    required this.score,
+    required this.color,
+    required this.size,
+  });
 
   final int score;
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     final gradientEnd = Color.lerp(color, const Color(0xFFFFA15B), 0.35)!;
 
     return Container(
-      width: 220,
-      height: 220,
+      width: size,
+      height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -233,8 +303,8 @@ class _ShieldScore extends StatelessWidget {
       child: ClipPath(
         clipper: const _ShieldClipper(),
         child: Container(
-          width: 176,
-          height: 176,
+          width: size * 0.8,
+          height: size * 0.8,
           decoration: BoxDecoration(
             gradient: RadialGradient(
               center: const Alignment(0.25, -0.15),
@@ -246,9 +316,9 @@ class _ShieldScore extends StatelessWidget {
           alignment: Alignment.center,
           child: Text(
             '$score',
-            style: const TextStyle(
-              color: Color(0xFF6A2A0B),
-              fontSize: 64,
+            style: TextStyle(
+              color: const Color(0xFF6A2A0B),
+              fontSize: size * 0.29,
               fontWeight: FontWeight.w400,
               height: 1,
             ),
@@ -286,7 +356,7 @@ class _FeatureGrid extends StatelessWidget {
             : 'Remaining ${_formatBytes(freeBytes)} available storage',
         icon: Icons.cleaning_services_rounded,
         color: const Color(0xFF087BFF),
-        onTap: context.pushScanResults,
+        onTap: context.goToScanResults,
       ),
       _FeatureCardData(
         title: 'Security Scan',
@@ -295,7 +365,7 @@ class _FeatureGrid extends StatelessWidget {
             : 'Security scan not conducted yet',
         icon: Icons.verified_user_rounded,
         color: const Color(0xFF2FD7A1),
-        onTap: context.pushScanResults,
+        onTap: context.goToScanResults,
       ),
       _FeatureCardData(
         title: 'App Management',
@@ -308,7 +378,7 @@ class _FeatureGrid extends StatelessWidget {
         subtitleColor: hasScanned && fileCount > 12
             ? const Color(0xFFFF6678)
             : null,
-        onTap: context.pushLargeFiles,
+        onTap: context.goToLargeFiles,
       ),
       _FeatureCardData(
         title: 'Booster',
@@ -329,7 +399,7 @@ class _FeatureGrid extends StatelessWidget {
         subtitle: 'Battery: $batteryPercent%',
         icon: Icons.battery_charging_full_rounded,
         color: const Color(0xFF0D7BFF),
-        onTap: context.pushSettings,
+        onTap: context.goToSettings,
       ),
       _FeatureCardData(
         title: 'Privacy & Security',
@@ -340,34 +410,37 @@ class _FeatureGrid extends StatelessWidget {
         color: const Color(0xFFFF2875),
         alert: !hasScanned,
         subtitleColor: !hasScanned ? const Color(0xFFFF6678) : null,
-        onTap: context.pushDuplicates,
+        onTap: context.goToDuplicates,
       ),
       _FeatureCardData(
         title: 'Network\nAssistant',
         subtitle: 'No data plan set',
         icon: Icons.swap_vert_rounded,
         color: const Color(0xFF147CFF),
-        onTap: context.pushSettings,
+        onTap: context.goToSettings,
       ),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        const spacing = 12.0;
-        final columns = constraints.maxWidth >= 760 ? 4 : 2;
+        const spacing = 9.0;
+        const columns = 2;
         final cardWidth =
             (constraints.maxWidth - spacing * (columns - 1)) / columns;
+        final cardHeight = (constraints.maxHeight - spacing * 3) / 4;
+        final aspectRatio = cardWidth / cardHeight.clamp(78.0, 140.0);
 
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            for (final card in cards)
-              SizedBox(
-                width: cardWidth,
-                child: _FeatureCard(data: card),
-              ),
-          ],
+        return GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          itemCount: cards.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+            childAspectRatio: aspectRatio,
+          ),
+          itemBuilder: (context, index) => _FeatureCard(data: cards[index]),
         );
       },
     );
@@ -387,44 +460,67 @@ class _FeatureCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: data.onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 186),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 18, 18, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _FeatureIcon(
-                  icon: data.icon,
-                  color: data.color,
-                  alert: data.alert,
-                ),
-                const Spacer(),
-                Text(
-                  data.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.white,
-                    fontSize: 22,
-                    height: 1.16,
-                    fontWeight: FontWeight.w500,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final dense = constraints.maxHeight < 112;
+            final iconSize = dense ? 40.0 : 46.0;
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                dense ? 13 : 15,
+                dense ? 10 : 12,
+                dense ? 11 : 13,
+                dense ? 10 : 12,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _FeatureIcon(
+                    icon: data.icon,
+                    color: data.color,
+                    alert: data.alert,
+                    size: iconSize,
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  data.subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: data.subtitleColor ?? const Color(0xFF919191),
-                    height: 1.25,
-                    fontWeight: FontWeight.w500,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          data.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontSize: dense ? 15 : 16.5,
+                                height: 1.06,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        SizedBox(height: dense ? 4 : 6),
+                        Text(
+                          data.subtitle,
+                          maxLines: dense ? 1 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(
+                                color:
+                                    data.subtitleColor ??
+                                    const Color(0xFFA0A0A0),
+                                fontSize: dense ? 11 : 12.5,
+                                height: 1.15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -436,24 +532,66 @@ class _FeatureIcon extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.alert,
+    required this.size,
   });
 
   final IconData icon;
   final Color color;
   final bool alert;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 58,
-      height: 58,
+      width: size,
+      height: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           DecoratedBox(
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                center: const Alignment(-0.35, -0.45),
+                radius: 1.08,
+                colors: [
+                  Color.lerp(color, Colors.white, 0.22)!,
+                  color,
+                  Color.lerp(color, Colors.black, 0.22)!,
+                ],
+              ),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.16),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.28),
+                  blurRadius: 16,
+                  spreadRadius: -5,
+                ),
+              ],
+            ),
             child: SizedBox.expand(
-              child: Icon(icon, color: Colors.white, size: 28),
+              child: Icon(icon, color: Colors.white, size: size * 0.48),
+            ),
+          ),
+          Positioned(
+            left: -2,
+            top: size * 0.12,
+            child: Transform.rotate(
+              angle: -0.45,
+              child: Container(
+                width: size * 0.74,
+                height: size * 0.22,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    width: 1,
+                  ),
+                  borderRadius: BorderRadius.circular(size),
+                ),
+              ),
             ),
           ),
           if (alert)
@@ -520,33 +658,6 @@ class _DotIconButton extends StatelessWidget {
   }
 }
 
-class _NotesButton extends StatelessWidget {
-  const _NotesButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(10),
-      child: Ink(
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFFB12A), Color(0xFFF15C2C), Color(0xFF245BFF)],
-          ),
-          borderRadius: BorderRadius.circular(9),
-        ),
-        child: const Icon(Icons.receipt_long_rounded, color: Colors.white),
-      ),
-    );
-  }
-}
-
 class _HomeDrawer extends StatelessWidget {
   const _HomeDrawer();
 
@@ -572,22 +683,22 @@ class _HomeDrawer extends StatelessWidget {
             _DrawerLink(
               icon: Icons.cleaning_services_rounded,
               title: 'Storage Clean',
-              onTap: context.pushScanResults,
+              routeName: AppRouteNames.scanResults,
             ),
             _DrawerLink(
               icon: Icons.insert_drive_file_rounded,
               title: 'Large Files',
-              onTap: context.pushLargeFiles,
+              routeName: AppRouteNames.largeFiles,
             ),
             _DrawerLink(
               icon: Icons.file_copy_rounded,
               title: 'Duplicate Finder',
-              onTap: context.pushDuplicates,
+              routeName: AppRouteNames.duplicates,
             ),
             _DrawerLink(
               icon: Icons.settings_rounded,
               title: 'Settings',
-              onTap: context.pushSettings,
+              routeName: AppRouteNames.settings,
             ),
           ],
         ),
@@ -600,12 +711,12 @@ class _DrawerLink extends StatelessWidget {
   const _DrawerLink({
     required this.icon,
     required this.title,
-    required this.onTap,
+    required this.routeName,
   });
 
   final IconData icon;
   final String title;
-  final VoidCallback onTap;
+  final String routeName;
 
   @override
   Widget build(BuildContext context) {
@@ -613,8 +724,9 @@ class _DrawerLink extends StatelessWidget {
       leading: Icon(icon, color: Colors.white),
       title: Text(title, style: const TextStyle(color: Colors.white)),
       onTap: () {
+        final router = GoRouter.of(context);
         Navigator.of(context).pop();
-        onTap();
+        router.goNamed(routeName);
       },
     );
   }
@@ -755,4 +867,101 @@ void _showHomeMessage(BuildContext context, String message) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+void _showVersionSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF111111),
+    showDragHandle: true,
+    builder: (context) => const _DashboardSheet(
+      icon: Icons.system_update_alt_rounded,
+      iconColor: Color(0xFFFF6A88),
+      title: 'App Version',
+      message:
+          'Version 1.0.0+1 is installed. New app versions and update prompts will appear here.',
+      actionLabel: 'Got it',
+    ),
+  );
+}
+
+void _showNewsSheet(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF111111),
+    showDragHandle: true,
+    builder: (context) => const _DashboardSheet(
+      icon: Icons.newspaper_rounded,
+      iconColor: Color(0xFFFF8A2A),
+      title: 'News & Features',
+      message:
+          'Latest SpacePilot feature notes, cleanup tips, and product news will live here.',
+      actionLabel: 'Close',
+    ),
+  );
+}
+
+class _DashboardSheet extends StatelessWidget {
+  const _DashboardSheet({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    required this.actionLabel,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final String actionLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 4, 22, 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: iconColor.withValues(alpha: 0.18),
+              foregroundColor: iconColor,
+              child: Icon(icon),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFFA8A8A8),
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D7DFF),
+                  foregroundColor: Colors.white,
+                ),
+                child: Text(actionLabel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

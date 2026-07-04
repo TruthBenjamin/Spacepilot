@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
@@ -18,5 +16,5 @@ final duplicateGroupsProvider = FutureProvider<List<DuplicateGroup>>((
 
   return ref
       .read(duplicateDetectorServiceProvider)
-      .findDuplicates(scan.files.map((file) => File(file.path)));
+      .findDuplicatesInScannedFiles(scan.files);
 });

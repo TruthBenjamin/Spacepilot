@@ -39,7 +39,8 @@ class MainActivity : FlutterActivity() {
         ).also { channel ->
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "scanStorage" -> beginScan(result)
+                    "scanStorage" -> beginLegacyScan(result)
+                    "scanStorageIntelligence" -> beginScan(result)
                     else -> result.notImplemented()
                 }
             }
@@ -140,9 +141,29 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun beginLegacyScan(result: MethodChannel.Result) {
+        if (hasStoragePermission()) {
+            executeLegacyScan(result)
+        } else {
+            result.error("PERMISSION_DENIED", "Storage access was not granted", null)
+        }
+    }
+
     private fun executeScan(result: MethodChannel.Result) {
         scannerExecutor.execute {
-            runCatching { scanStorage() }
+            runCatching { scanStorageIntelligence() }
+                .onSuccess { report -> runOnUiThread { result.success(report) } }
+                .onFailure { error ->
+                    runOnUiThread {
+                        result.error("SCAN_FAILED", error.message ?: "Storage scan failed", null)
+                    }
+                }
+        }
+    }
+
+    private fun executeLegacyScan(result: MethodChannel.Result) {
+        scannerExecutor.execute {
+            runCatching { scanStorageIntelligence()["files"] ?: emptyList<Map<String, Any>>() }
                 .onSuccess { files -> runOnUiThread { result.success(files) } }
                 .onFailure { error ->
                     runOnUiThread {
@@ -231,6 +252,112 @@ class MainActivity : FlutterActivity() {
         return true
     }
 
+    private fun scanStorageIntelligence(): Map<String, Any> {
+        val startedAt = System.currentTimeMillis()
+        val files = mutableListOf<Map<String, Any>>()
+        val folderAccumulators = mutableMapOf<String, FolderAccumulator>()
+        val categoryAccumulators = mutableMapOf<String, CategoryAccumulator>()
+        val emptyFolders = mutableListOf<Map<String, Any>>()
+        val scannedRootPaths = mutableListOf<String>()
+
+        scanRoots().forEach { root ->
+            val canonicalRoot = runCatching { root.canonicalFile }.getOrNull()
+                ?: return@forEach
+            if (!canonicalRoot.exists() || !canonicalRoot.isDirectory) return@forEach
+
+            scannedRootPaths += canonicalRoot.absolutePath
+            val pending = ArrayDeque<File>().apply { add(canonicalRoot) }
+
+            while (pending.isNotEmpty()) {
+                val current = pending.removeLast()
+                val entries = current.listFiles()
+                if (entries != null && entries.isEmpty()) {
+                    emptyFolders += mapOf(
+                        "path" to current.absolutePath,
+                        "lastModified" to current.lastModified(),
+                    )
+                }
+                entries?.forEach { entry ->
+                    if (Files.isSymbolicLink(entry.toPath())) return@forEach
+
+                    val canonicalEntry = runCatching { entry.canonicalFile }.getOrNull()
+                        ?: return@forEach
+                    if (!isInside(canonicalEntry, canonicalRoot)) return@forEach
+
+                    if (canonicalEntry.isDirectory) {
+                        pending.add(canonicalEntry)
+                    } else if (canonicalEntry.isFile) {
+                        val sizeBytes = canonicalEntry.length().coerceAtLeast(0L)
+                        val lastModified = canonicalEntry.lastModified()
+                        val categories = categoriesFor(canonicalEntry)
+                        val previewType = previewTypeFor(categories)
+                        val previewPath = if (previewType != null) {
+                            canonicalEntry.absolutePath
+                        } else {
+                            null
+                        }
+                        val file = mutableMapOf<String, Any>(
+                            "filename" to canonicalEntry.name,
+                            "path" to canonicalEntry.absolutePath,
+                            "size" to sizeBytes,
+                            "lastModified" to lastModified,
+                            "categories" to categories,
+                        )
+                        if (previewPath != null && previewType != null) {
+                            file["previewPath"] = previewPath
+                            file["previewType"] = previewType
+                        }
+                        files += file
+                        addFileToFolders(
+                            canonicalEntry.parentFile,
+                            canonicalRoot,
+                            sizeBytes,
+                            lastModified,
+                            folderAccumulators,
+                        )
+                        categories.forEach { category ->
+                            val accumulator = categoryAccumulators.getOrPut(category) {
+                                CategoryAccumulator()
+                            }
+                            accumulator.fileCount += 1
+                            accumulator.totalBytes += sizeBytes
+                        }
+                    }
+                }
+            }
+        }
+
+        val largestFolders = folderAccumulators.entries
+            .sortedByDescending { it.value.sizeBytes }
+            .take(MAX_REPORTED_FOLDERS)
+            .map { (path, accumulator) ->
+                mapOf(
+                    "path" to path,
+                    "sizeBytes" to accumulator.sizeBytes,
+                    "fileCount" to accumulator.fileCount,
+                    "lastModified" to accumulator.lastModified,
+                )
+            }
+        val summaries = STORAGE_CATEGORIES.map { category ->
+            val accumulator = categoryAccumulators[category] ?: CategoryAccumulator()
+            mapOf(
+                "category" to category,
+                "fileCount" to accumulator.fileCount,
+                "totalBytes" to accumulator.totalBytes,
+            )
+        }
+
+        return mapOf(
+            "storageStats" to storageStatsSnapshot(startedAt),
+            "files" to files,
+            "largestFolders" to largestFolders,
+            "emptyFolders" to emptyFolders,
+            "categorySummaries" to summaries,
+            "scannedRootPaths" to scannedRootPaths.distinct(),
+            "completedAt" to System.currentTimeMillis(),
+        )
+    }
+
     private fun scanStorage(): List<Map<String, Any>> {
         val files = mutableListOf<Map<String, Any>>()
         SCANNED_FOLDERS.forEach { directoryType ->
@@ -261,6 +388,89 @@ class MainActivity : FlutterActivity() {
             }
         }
         return files
+    }
+
+    private fun scanRoots(): List<File> {
+        val roots = mutableListOf<File>()
+        roots += Environment.getExternalStorageDirectory()
+        externalMediaDirs.filterNotNull().forEach { roots += mediaStorageRoot(it) }
+
+        val canonicalRoots = roots
+            .mapNotNull { root -> runCatching { root.canonicalFile }.getOrNull() }
+            .distinctBy { it.absolutePath }
+
+        return canonicalRoots.filter { candidate ->
+            canonicalRoots.none { other ->
+                other.absolutePath != candidate.absolutePath && isInside(candidate, other)
+            }
+        }
+    }
+
+    private fun mediaStorageRoot(mediaDirectory: File): File {
+        var current: File? = mediaDirectory
+        while (current != null && current.name != "Android") {
+            current = current.parentFile
+        }
+
+        return current?.parentFile ?: mediaDirectory
+    }
+
+    private fun addFileToFolders(
+        parent: File?,
+        root: File,
+        sizeBytes: Long,
+        lastModified: Long,
+        accumulators: MutableMap<String, FolderAccumulator>,
+    ) {
+        var current = parent
+        while (current != null && isInside(current, root) && current.absolutePath != root.absolutePath) {
+            val accumulator = accumulators.getOrPut(current.absolutePath) { FolderAccumulator() }
+            accumulator.sizeBytes += sizeBytes
+            accumulator.fileCount += 1
+            if (lastModified > accumulator.lastModified) {
+                accumulator.lastModified = lastModified
+            }
+            current = current.parentFile
+        }
+    }
+
+    private fun storageStatsSnapshot(capturedAt: Long): Map<String, Any> {
+        val root = Environment.getExternalStorageDirectory()
+        val totalBytes = root.totalSpace.coerceAtLeast(0L)
+        val freeBytes = root.freeSpace.coerceIn(0L, totalBytes)
+        val usedBytes = (totalBytes - freeBytes).coerceAtLeast(0L)
+
+        return mapOf(
+            "totalBytes" to totalBytes,
+            "usedBytes" to usedBytes,
+            "freeBytes" to freeBytes,
+            "capturedAt" to capturedAt,
+        )
+    }
+
+    private fun categoriesFor(file: File): List<String> {
+        val extension = file.extension.lowercase()
+        val normalizedPath = file.absolutePath.replace(File.separatorChar, '/').lowercase()
+        val categories = mutableListOf<String>()
+
+        if (extension in IMAGE_EXTENSIONS) categories += "image"
+        if (extension in VIDEO_EXTENSIONS) categories += "video"
+        if (extension in AUDIO_EXTENSIONS) categories += "audio"
+        if (extension in DOCUMENT_EXTENSIONS) categories += "document"
+        if (extension == "apk") categories += "apk"
+        if (extension in ZIP_EXTENSIONS) categories += "zip"
+        if (normalizedPath.contains("/download/")) categories += "download"
+        if (categories.isEmpty()) categories += "other"
+
+        return categories
+    }
+
+    private fun previewTypeFor(categories: List<String>): String? {
+        return when {
+            "image" in categories -> "image"
+            "video" in categories -> "video"
+            else -> null
+        }
     }
 
     private fun isInside(entry: File, root: File): Boolean {
@@ -353,6 +563,17 @@ class MainActivity : FlutterActivity() {
         MEDIA,
     }
 
+    private data class FolderAccumulator(
+        var sizeBytes: Long = 0L,
+        var fileCount: Int = 0,
+        var lastModified: Long = 0L,
+    )
+
+    private data class CategoryAccumulator(
+        var fileCount: Int = 0,
+        var totalBytes: Long = 0L,
+    )
+
     private companion object {
         const val STORAGE_SCANNER_CHANNEL = "ai.spacepilot.app/storage_scanner"
         const val PERMISSIONS_CHANNEL = "ai.spacepilot.app/permissions"
@@ -365,6 +586,62 @@ class MainActivity : FlutterActivity() {
         const val MEDIA_PERMISSION_REQUEST = 4103
         const val AGENT_MONITORING_JOB_ID = 4201
         const val AGENT_MONITORING_INTERVAL_MS = 60L * 60L * 1000L
+        const val MAX_REPORTED_FOLDERS = 50
+        val STORAGE_CATEGORIES = listOf(
+            "image",
+            "video",
+            "audio",
+            "document",
+            "apk",
+            "zip",
+            "download",
+            "other",
+        )
+        val IMAGE_EXTENSIONS = setOf(
+            "gif",
+            "heic",
+            "jpeg",
+            "jpg",
+            "png",
+            "raw",
+            "webp",
+        )
+        val VIDEO_EXTENSIONS = setOf(
+            "3gp",
+            "avi",
+            "m4v",
+            "mkv",
+            "mov",
+            "mp4",
+            "webm",
+        )
+        val AUDIO_EXTENSIONS = setOf(
+            "aac",
+            "flac",
+            "m4a",
+            "mp3",
+            "ogg",
+            "opus",
+            "wav",
+            "wma",
+        )
+        val DOCUMENT_EXTENSIONS = setOf(
+            "csv",
+            "doc",
+            "docx",
+            "epub",
+            "odp",
+            "ods",
+            "odt",
+            "pdf",
+            "ppt",
+            "pptx",
+            "rtf",
+            "txt",
+            "xls",
+            "xlsx",
+        )
+        val ZIP_EXTENSIONS = setOf("7z", "gz", "rar", "tar", "zip")
         val SCANNED_FOLDERS = listOf(
             Environment.DIRECTORY_DOWNLOADS,
             Environment.DIRECTORY_DCIM,
