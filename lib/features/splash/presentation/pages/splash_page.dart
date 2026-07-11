@@ -35,7 +35,9 @@ class _SplashPageState extends State<SplashPage>
   }
 
   Future<void> _navigateAfterSplash() async {
-    final completedOnboarding = await _preferences.hasCompletedOnboarding();
+    final completedOnboarding = await _preferences
+        .hasCompletedOnboarding()
+        .timeout(const Duration(seconds: 2), onTimeout: () => false);
     if (!mounted) return;
 
     context.go(
@@ -114,7 +116,7 @@ class _SplashPageState extends State<SplashPage>
                       ),
                       SizedBox(height: middleGap.toDouble()),
                       Text(
-                        'Initializing AI Engine...',
+                        'Preparing SpacePilot...',
                         style: textTheme.labelLarge?.copyWith(
                           color: Colors.white,
                         ),
@@ -123,17 +125,9 @@ class _SplashPageState extends State<SplashPage>
                       ClipRRect(
                         borderRadius: BorderRadius.circular(999),
                         child: const LinearProgressIndicator(
-                          value: 0.78,
                           minHeight: 8,
                           backgroundColor: Color(0xFF1D2545),
                           valueColor: AlwaysStoppedAnimation(Color(0xFF9B5CFF)),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '78%',
-                        style: textTheme.labelMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.72),
                         ),
                       ),
                     ],

@@ -2,24 +2,29 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app_analyzer/presentation/providers/app_analyzer_provider.dart';
+import '../../../permissions/presentation/providers/permission_service_provider.dart';
 import '../../data/services/onboarding_preferences_service.dart';
 import '../../../../routes/app_routes.dart';
 import '../../../../shared/presentation/widgets/space_background.dart';
 
-class OnboardingPage extends StatefulWidget {
+class OnboardingPage extends ConsumerStatefulWidget {
   const OnboardingPage({super.key});
 
   @override
-  State<OnboardingPage> createState() => _OnboardingPageState();
+  ConsumerState<OnboardingPage> createState() => _OnboardingPageState();
 }
 
-class _OnboardingPageState extends State<OnboardingPage> {
+class _OnboardingPageState extends ConsumerState<OnboardingPage>
+    with WidgetsBindingObserver {
   final PageController _controller = PageController();
   final OnboardingPreferencesService _preferences =
       OnboardingPreferencesService();
   int _index = 0;
   bool _isFinishing = false;
+  bool _hasRequiredAccess = false;
 
   static const _slides = [
     _Slide(
@@ -40,6 +45,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
       icon: Icons.smart_toy_rounded,
     ),
     _Slide(
+      title: 'Usage-aware app insights',
+      body:
+          'Grant Android Usage Access to show last-used apps and detailed app storage where supported.',
+      icon: Icons.manage_search_rounded,
+    ),
+    _Slide(
       title: 'You stay in control',
       body: 'Every cleanup action is reviewed before anything is deleted.',
       icon: Icons.rule_rounded,
@@ -49,7 +60,32 @@ class _OnboardingPageState extends State<OnboardingPage> {
   bool get _isLast => _index == _slides.length - 1;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshRequiredAccess();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshRequiredAccess();
+    }
+  }
+
+  Future<void> _refreshRequiredAccess() async {
+    final permissions = ref.read(permissionServiceProvider);
+    final hasAccess =
+        await permissions.hasStorageAccess() &&
+        await permissions.hasMediaAccess();
+    if (mounted && hasAccess != _hasRequiredAccess) {
+      setState(() => _hasRequiredAccess = hasAccess);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
@@ -57,6 +93,47 @@ class _OnboardingPageState extends State<OnboardingPage> {
   Future<void> _finish() async {
     if (_isFinishing) return;
     setState(() => _isFinishing = true);
+
+    if (!_hasRequiredAccess) {
+      final hasAccess = await ref
+          .read(permissionServiceProvider)
+          .requestRequiredAccess();
+      if (!mounted) return;
+
+      setState(() {
+        _hasRequiredAccess = hasAccess;
+        _isFinishing = false;
+      });
+      if (!hasAccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Storage and media access are required before SpacePilot can scan real files.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final appAnalyzer = ref.read(appAnalyzerServiceProvider);
+    final hasUsageAccess =
+        !appAnalyzer.isSupported || await appAnalyzer.hasUsageAccess();
+    if (!mounted) return;
+
+    if (!hasUsageAccess) {
+      await appAnalyzer.openUsageAccessSettings();
+      if (!mounted) return;
+      setState(() => _isFinishing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Grant Usage Access to unlock app last-used and storage insights, then return to continue.',
+          ),
+        ),
+      );
+      return;
+    }
 
     await _preferences.setOnboardingCompleted();
     if (!mounted) return;
@@ -87,13 +164,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 Row(
                   children: [
                     Text(
-                      'Smart Cleaning',
+                      'Real Storage Access',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         color: const Color(0xFFB9C4F6),
                       ),
                     ),
-                    const Spacer(),
-                    TextButton(onPressed: _finish, child: const Text('Skip')),
                   ],
                 ),
                 Expanded(
@@ -112,7 +187,11 @@ class _OnboardingPageState extends State<OnboardingPage> {
                     const Spacer(),
                     FilledButton(
                       onPressed: _isFinishing ? null : _next,
-                      child: Text(_isLast ? 'Start' : 'Next'),
+                      child: Text(
+                        _isLast
+                            ? (_hasRequiredAccess ? 'Continue' : 'Grant access')
+                            : 'Next',
+                      ),
                     ),
                   ],
                 ),

@@ -55,6 +55,35 @@ final class AutoCleanRules {
       screenshotAgeDays: screenshotAgeDays ?? this.screenshotAgeDays,
     );
   }
+
+  Map<String, Object> toJson() => {
+    'enabled': enabled,
+    'includeDuplicateCopies': includeDuplicateCopies,
+    'includeApkInstallers': includeApkInstallers,
+    'includeOldScreenshots': includeOldScreenshots,
+    'includeUnusedFiles': includeUnusedFiles,
+    'includeEmptyFolders': includeEmptyFolders,
+    'unusedFileAgeDays': unusedFileAgeDays,
+    'screenshotAgeDays': screenshotAgeDays,
+  };
+
+  static AutoCleanRules fromJson(Object? value) {
+    if (value is! Map<String, Object?>) return const AutoCleanRules.defaults();
+    return AutoCleanRules(
+      enabled: value['enabled'] == true,
+      includeDuplicateCopies: value['includeDuplicateCopies'] != false,
+      includeApkInstallers: value['includeApkInstallers'] != false,
+      includeOldScreenshots: value['includeOldScreenshots'] != false,
+      includeUnusedFiles: value['includeUnusedFiles'] == true,
+      includeEmptyFolders: value['includeEmptyFolders'] != false,
+      unusedFileAgeDays: value['unusedFileAgeDays'] is num
+          ? (value['unusedFileAgeDays'] as num).round().clamp(30, 730)
+          : 180,
+      screenshotAgeDays: value['screenshotAgeDays'] is num
+          ? (value['screenshotAgeDays'] as num).round().clamp(7, 365)
+          : 90,
+    );
+  }
 }
 
 @immutable

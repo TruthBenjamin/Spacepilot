@@ -42,7 +42,6 @@ void main() {
     expect(find.text('2 files found'), findsOneWidget);
     expect(find.text('0 selected'), findsOneWidget);
     expect(find.text('movie.mp4'), findsOneWidget);
-    expect(find.text('archive.zip'), findsOneWidget);
     expect(find.text('tiny.txt'), findsNothing);
 
     await tester.tap(find.text('movie.mp4'));
@@ -50,6 +49,53 @@ void main() {
 
     expect(find.text('1 selected'), findsOneWidget);
     expect(find.text('800.0 MB'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.text('archive.zip'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('archive.zip'), findsOneWidget);
+  });
+
+  testWidgets('selects the visible review set in one action', (tester) async {
+    await tester.pumpWidget(buildPage());
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('2 ready to review'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('2 ready to review'), findsOneWidget);
+    await tester.ensureVisible(
+      find.widgetWithText(OutlinedButton, 'Select all'),
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Select all'));
+    await tester.pump();
+
+    expect(find.textContaining('1.0 GB'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.text('Review briefing'),
+      160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Review briefing'), findsOneWidget);
+    expect(find.text('2 selected for deletion'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.widgetWithText(TextButton, 'Clear'),
+      -160,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+    await tester.pump();
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 900));
+    await tester.pumpAndSettle();
+    expect(find.text('0 selected'), findsOneWidget);
   });
 
   testWidgets('asks for confirmation before deleting selected large files', (
@@ -58,9 +104,10 @@ void main() {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
 
-    await Scrollable.ensureVisible(
-      tester.element(find.text('archive.zip')),
-      alignment: 0.3,
+    await tester.scrollUntilVisible(
+      find.text('archive.zip'),
+      160,
+      scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('archive.zip'));
@@ -116,11 +163,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'archive');
     await tester.pumpAndSettle();
-    await Scrollable.ensureVisible(
-      tester.element(find.text('archive.zip')),
-      alignment: 0.3,
-    );
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 900));
     await tester.pumpAndSettle();
+    expect(find.text('archive.zip'), findsOneWidget);
     await tester.tap(find.text('archive.zip'));
     await tester.pump();
 
@@ -160,7 +205,10 @@ void main() {
     expect(find.text('large-74.bin'), findsOneWidget);
     expect(find.text('large-24.bin'), findsNothing);
 
-    final loadMore = find.widgetWithText(OutlinedButton, 'Load more (50 of 75)');
+    final loadMore = find.widgetWithText(
+      OutlinedButton,
+      'Load more (50 of 75)',
+    );
     await tester.scrollUntilVisible(
       loadMore,
       600,

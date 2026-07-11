@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -7,11 +9,16 @@ import '../../domain/models/storage_stats.dart';
 
 /// Scans user-accessible Android storage through the platform channel.
 final class StorageScannerService {
-  StorageScannerService({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(_channelName);
+  StorageScannerService({MethodChannel? channel, Duration? timeout})
+    : _channel = channel ?? const MethodChannel(_channelName),
+      _timeout = timeout ?? const Duration(minutes: 2) {
+    _channel.setMethodCallHandler(_handleNativeCall);
+  }
 
   static const String _channelName = 'ai.spacepilot.app/storage_scanner';
   final MethodChannel _channel;
+  final Duration _timeout;
+  void Function(StorageScannerProgress progress)? _progressListener;
 
   /// Returns every file discovered by the storage intelligence scan.
   ///
@@ -25,14 +32,30 @@ final class StorageScannerService {
   ///
   /// Storage read access (all-files access on Android 11+) must be granted
   /// before calling this method.
-  Future<StorageIntelligenceReport> scanIntelligence() async {
+  Future<StorageIntelligenceReport> scanIntelligence({
+    void Function(StorageScannerProgress progress)? onProgress,
+    bool includeHidden = false,
+  }) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       throw UnsupportedError('StorageScannerService is Android-only.');
     }
 
-    final result = await _channel.invokeMethod<Object?>(
-      'scanStorageIntelligence',
-    );
+    _progressListener = onProgress;
+    late final Object? result;
+    try {
+      result = await _channel
+          .invokeMethod<Object?>('scanStorageIntelligence', {
+            'includeHidden': includeHidden,
+          })
+          .timeout(
+            _timeout,
+            onTimeout: () => throw TimeoutException(
+              'Storage scan timed out. Please try again.',
+            ),
+          );
+    } finally {
+      _progressListener = null;
+    }
     if (result == null) return StorageIntelligenceReport.empty();
 
     if (result is List<Object?>) {
@@ -44,6 +67,48 @@ final class StorageScannerService {
 
     throw StateError('Storage scanner returned an invalid payload.');
   }
+
+  Future<void> cancelScan() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    await _channel.invokeMethod<void>('cancelStorageScan');
+  }
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (call.method != 'storageScanProgress') return;
+    final arguments = call.arguments;
+    if (arguments is! Map<Object?, Object?>) return;
+
+    final fraction = arguments['fraction'];
+    final filesAnalyzed = arguments['filesAnalyzed'];
+    final bytesAnalyzed = arguments['bytesAnalyzed'];
+    final scannedRootCount = arguments['scannedRootCount'];
+    if (fraction is! num) return;
+
+    _progressListener?.call(
+      StorageScannerProgress(
+        fraction: fraction.toDouble().clamp(0, 1),
+        filesAnalyzed: filesAnalyzed is num ? filesAnalyzed.toInt() : 0,
+        bytesAnalyzed: bytesAnalyzed is num ? bytesAnalyzed.toInt() : 0,
+        scannedRootCount: scannedRootCount is num
+            ? scannedRootCount.toInt()
+            : 0,
+      ),
+    );
+  }
+}
+
+final class StorageScannerProgress {
+  const StorageScannerProgress({
+    required this.fraction,
+    required this.filesAnalyzed,
+    required this.bytesAnalyzed,
+    required this.scannedRootCount,
+  });
+
+  final double fraction;
+  final int filesAnalyzed;
+  final int bytesAnalyzed;
+  final int scannedRootCount;
 }
 
 StorageIntelligenceReport _reportFromLegacyFiles(List<Object?> files) {
@@ -215,9 +280,7 @@ StorageStats _storageStatsFromMap(
   final totalBytes = _safeBytes(map['totalBytes']);
   final freeBytes = _safeBytes(map['freeBytes']).clamp(0, totalBytes).toInt();
   final reportedUsedBytes = _safeBytes(map['usedBytes']);
-  final usedBytes = reportedUsedBytes
-      .clamp(0, totalBytes - freeBytes)
-      .toInt();
+  final usedBytes = reportedUsedBytes.clamp(0, totalBytes - freeBytes).toInt();
   final capturedAt = _dateTimeFromMilliseconds(map['capturedAt'], fallbackDate);
 
   return StorageStats(
@@ -262,7 +325,9 @@ StorageCategorySummary _categorySummaryFromMap(Map<Object?, Object?> map) {
   final category = map['category'];
   final fileCount = map['fileCount'];
   final totalBytes = map['totalBytes'];
-  final parsedCategory = category is String ? _categoryFromString(category) : null;
+  final parsedCategory = category is String
+      ? _categoryFromString(category)
+      : null;
 
   if (parsedCategory == null || fileCount is! num || totalBytes is! num) {
     throw const FormatException('Invalid category summary payload.');
@@ -347,7 +412,9 @@ Set<StorageFileCategory> _categoriesForFile(ScannedFile file) {
     categories.add(StorageFileCategory.document);
   }
   if (extension == 'apk') categories.add(StorageFileCategory.apk);
-  if (_zipExtensions.contains(extension)) categories.add(StorageFileCategory.zip);
+  if (_zipExtensions.contains(extension)) {
+    categories.add(StorageFileCategory.zip);
+  }
   if (path.contains('/download/')) categories.add(StorageFileCategory.download);
   if (categories.isEmpty) categories.add(StorageFileCategory.other);
 

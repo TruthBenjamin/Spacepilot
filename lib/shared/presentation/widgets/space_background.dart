@@ -7,21 +7,123 @@ class SpaceBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
+
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF050716), Color(0xFF0A0E24), Color(0xFF120B2F)],
+          colors: isDark
+              ? const [Color(0xFF040914), Color(0xFF101D3C), Color(0xFF14264D)]
+              : [
+                  colorScheme.surface,
+                  colorScheme.primaryContainer.withValues(alpha: 0.28),
+                  colorScheme.surfaceContainerHighest.withValues(alpha: 0.88),
+                ],
         ),
       ),
       child: Stack(
         children: [
-          const Positioned.fill(child: RepaintBoundary(child: _StarField())),
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: _SpaceBackdrop(colorScheme: colorScheme, isDark: isDark),
+            ),
+          ),
           Positioned.fill(child: child),
         ],
       ),
     );
+  }
+}
+
+class _SpaceBackdrop extends StatelessWidget {
+  const _SpaceBackdrop({required this.colorScheme, required this.isDark});
+
+  final ColorScheme colorScheme;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      isComplex: true,
+      willChange: false,
+      painter: _SpaceBackdropPainter(colorScheme: colorScheme, isDark: isDark),
+    );
+  }
+}
+
+class _SpaceBackdropPainter extends CustomPainter {
+  const _SpaceBackdropPainter({
+    required this.colorScheme,
+    required this.isDark,
+  });
+
+  final ColorScheme colorScheme;
+  final bool isDark;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final starPaint = Paint()
+      ..color = colorScheme.primary.withValues(alpha: isDark ? 0.16 : 0.12);
+    for (var i = 0; i < 70; i++) {
+      final x = (i * 53) % size.width;
+      final y = (i * 31) % size.height;
+      canvas.drawCircle(Offset(x, y), i % 7 == 0 ? 1.4 : 0.8, starPaint);
+    }
+
+    final ringPaint = Paint()
+      ..color = colorScheme.primary.withValues(alpha: isDark ? 0.10 : 0.14)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 16;
+
+    canvas.drawCircle(
+      Offset(size.width * 0.78, size.height * 0.24),
+      size.width * 0.20,
+      ringPaint,
+    );
+
+    final orbitPaint = Paint()
+      ..color = colorScheme.primary.withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: Offset(size.width * 0.72, size.height * 0.20),
+        radius: size.width * 0.24,
+      ),
+      2.2,
+      2.0,
+      false,
+      orbitPaint,
+    );
+
+    final glow = Paint()
+      ..shader =
+          RadialGradient(
+            colors: [
+              colorScheme.primary.withValues(alpha: 0.18),
+              Colors.transparent,
+            ],
+          ).createShader(
+            Rect.fromCircle(
+              center: Offset(size.width * 0.25, size.height * 0.18),
+              radius: size.width * 0.26,
+            ),
+          );
+
+    canvas.drawCircle(
+      Offset(size.width * 0.25, size.height * 0.18),
+      size.width * 0.26,
+      glow,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpaceBackdropPainter oldDelegate) {
+    return false;
   }
 }
 
@@ -117,56 +219,6 @@ class SpaceBotMark extends StatelessWidget {
       child: CustomPaint(painter: _SpaceBotPainter()),
     );
   }
-}
-
-class _StarField extends StatelessWidget {
-  const _StarField();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      isComplex: true,
-      willChange: false,
-      painter: const _StarFieldPainter(),
-    );
-  }
-}
-
-class _StarFieldPainter extends CustomPainter {
-  const _StarFieldPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.22);
-    for (var i = 0; i < 90; i++) {
-      final x = ((i * 47) % size.width).toDouble();
-      final y = ((i * 89) % size.height).toDouble();
-      final radius = i % 9 == 0 ? 1.4 : 0.7;
-      canvas.drawCircle(Offset(x, y), radius, paint);
-    }
-
-    final glow = Paint()
-      ..shader =
-          RadialGradient(
-            colors: [
-              const Color(0xFF7C3AED).withValues(alpha: 0.32),
-              Colors.transparent,
-            ],
-          ).createShader(
-            Rect.fromCircle(
-              center: Offset(size.width * 0.82, size.height * 0.18),
-              radius: size.width * 0.46,
-            ),
-          );
-    canvas.drawCircle(
-      Offset(size.width * 0.82, size.height * 0.18),
-      size.width * 0.46,
-      glow,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _SpaceBotPainter extends CustomPainter {

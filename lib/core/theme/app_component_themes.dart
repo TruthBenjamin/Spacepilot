@@ -17,14 +17,12 @@ abstract final class AppComponentThemes {
   static CardThemeData card(ColorScheme colorScheme) {
     return CardThemeData(
       elevation: 0,
-      color: colorScheme.surface.withValues(alpha: 0.92),
+      color: colorScheme.surface.withValues(alpha: 0.96),
       surfaceTintColor: Colors.transparent,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        side: BorderSide(
-          color: const Color(0xFF7C3AED).withValues(alpha: 0.18),
-        ),
-        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.18)),
+        borderRadius: BorderRadius.circular(22),
       ),
     );
   }
@@ -40,9 +38,13 @@ abstract final class AppComponentThemes {
         textStyle: const TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w700,
-          letterSpacing: 0,
+          letterSpacing: 0.15,
         ),
-        shape: RoundedRectangleBorder(borderRadius: AppRadii.standard.button),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(
+            Radius.circular(AppRadii.standard.pill),
+          ),
+        ),
       ),
     );
   }
@@ -52,13 +54,17 @@ abstract final class AppComponentThemes {
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(64, 52),
         foregroundColor: colorScheme.onSurface,
-        side: BorderSide(color: colorScheme.outline),
+        side: BorderSide(color: colorScheme.primaryContainer),
         textStyle: const TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w700,
-          letterSpacing: 0,
+          letterSpacing: 0.15,
         ),
-        shape: RoundedRectangleBorder(borderRadius: AppRadii.standard.button),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(
+            Radius.circular(AppRadii.standard.pill),
+          ),
+        ),
       ),
     );
   }
@@ -68,7 +74,7 @@ abstract final class AppComponentThemes {
 
     return InputDecorationThemeData(
       filled: true,
-      fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      fillColor: colorScheme.primaryContainer.withValues(alpha: 0.12),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
         borderRadius: radius,
@@ -109,7 +115,7 @@ abstract final class AppComponentThemes {
       secondaryLabelStyle: textTheme.labelMedium?.copyWith(
         color: colorScheme.onPrimaryContainer,
       ),
-      side: BorderSide(color: colorScheme.outlineVariant),
+      side: BorderSide(color: colorScheme.primary.withValues(alpha: 0.16)),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.standard.pill),
       ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,11 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../cleanup/data/services/cleanup_service.dart';
+import '../../../cleanup/presentation/providers/deletion_sync_provider.dart';
 import '../../../cleanup/presentation/providers/cleanup_service_provider.dart';
+import '../../data/services/large_file_action_service.dart';
 import '../../../../shared/presentation/widgets/space_background.dart';
 import '../../../storage/domain/models/scanned_file.dart';
-import '../../../storage/presentation/providers/device_storage_provider.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
+import '../../../settings/presentation/providers/settings_provider.dart';
 import '../../../../routes/app_navigation.dart';
 import '../providers/large_file_hunter_provider.dart';
 
@@ -55,6 +58,12 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
   final ValueNotifier<Set<String>> _selectedPaths = ValueNotifier(<String>{});
   final TextEditingController _searchController = TextEditingController();
   final List<_CleanupHistoryEntry> _history = [];
+  Timer? _searchDebounce;
+  List<ScannedFile>? _cachedSourceFiles;
+  List<ScannedFile>? _cachedVisibleFiles;
+  _LargeFileSort? _cachedSort;
+  _LargeFileKind? _cachedKind;
+  String? _cachedQuery;
   _LargeFileSort _sort = _LargeFileSort.largest;
   _LargeFileKind _kind = _LargeFileKind.all;
   String _query = '';
@@ -65,15 +74,22 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
   void initState() {
     super.initState();
     _searchController.addListener(() {
-      setState(() {
-        _query = _searchController.text.trim().toLowerCase();
-        _visiblePages = 1;
+      _searchDebounce?.cancel();
+      _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+        if (!mounted) return;
+        final query = _searchController.text.trim().toLowerCase();
+        if (query == _query) return;
+        setState(() {
+          _query = query;
+          _visiblePages = 1;
+        });
       });
     });
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _selectedPaths.dispose();
     _searchController.dispose();
     super.dispose();
@@ -84,6 +100,7 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
     final scanState = ref.watch(storageScanProvider);
     final threshold = ref.watch(largeFileThresholdProvider);
     final largeFiles = ref.watch(largeFileHunterProvider);
+    final fileActions = ref.watch(largeFileActionServiceProvider);
 
     Future<void> runScan() async {
       try {
@@ -141,11 +158,7 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
       }
       if (!context.mounted) return;
 
-      ref
-          .read(storageScanProvider.notifier)
-          .removeDeletedPaths(result.deletedPaths);
-      ref.invalidate(deviceStorageStatsProvider);
-      ref.invalidate(deviceStorageStatsWithHealthProvider);
+      ref.read(deletionSyncProvider).applyDeletedPaths(result.deletedPaths);
       setState(() {
         _isDeleting = false;
         _history.insert(
@@ -165,9 +178,69 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
       ).showSnackBar(SnackBar(content: Text(_cleanupMessage(result))));
     }
 
+    Future<void> openFile(ScannedFile file) async {
+      try {
+        await fileActions.open(file.path);
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_fileActionError(error))));
+      }
+    }
+
+    Future<void> shareFile(ScannedFile file) async {
+      try {
+        await fileActions.share(file.path);
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_fileActionError(error))));
+      }
+    }
+
+    Future<void> moveFile(ScannedFile file) async {
+      final destination = await _showMoveDestinationPicker(context);
+      if (destination == null || !context.mounted) return;
+
+      try {
+        final result = await fileActions.move(
+          path: file.path,
+          destination: destination,
+        );
+        ref
+            .read(storageScanProvider.notifier)
+            .moveFilePath(
+              fromPath: file.path,
+              toPath: result.path,
+              filename: result.filename,
+            );
+        _removeSelectedPaths([file.path]);
+        if (!context.mounted) return;
+        Navigator.of(context).maybePop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Moved ${result.filename} to ${destination.label}.'),
+          ),
+        );
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_fileActionError(error))));
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Large File Hunter'),
+        title: Row(
+          children: const [
+            Icon(Icons.rocket_launch_rounded, size: 20),
+            SizedBox(width: 10),
+            Text('Large File Hunter'),
+          ],
+        ),
         centerTitle: false,
       ),
       body: SpaceBackground(
@@ -243,26 +316,35 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
                             selectedPaths: _selectedPaths,
                             isDeleting: _isDeleting,
                             padding: resultPadding,
+                            selectedSourceFiles: visibleFiles,
                             onFileChanged: _setFileSelected,
-                            onFileDetails: (file) =>
-                                _showFileDetails(context, file),
-                            onDeleteSelected: () => deleteSelected(pagedFiles),
+                            onSelectVisible: () =>
+                                _selectVisibleFiles(pagedFiles),
+                            onClearSelection: _clearSelection,
+                            onFileDetails: (file) => _showFileDetails(
+                              context,
+                              file,
+                              actionsSupported: fileActions.isSupported,
+                              onOpen: () => openFile(file),
+                              onShare: () => shareFile(file),
+                              onMove: () => moveFile(file),
+                            ),
+                            onDeleteSelected: () =>
+                                deleteSelected(visibleFiles),
                             history: _history,
                             stats: _LargeFileStats(files: files),
                             filters: _FilterPanel(
                               searchController: _searchController,
                               selectedKind: _kind,
                               selectedSort: _sort,
-                              onKindChanged: (kind) =>
-                                  setState(() {
-                                    _kind = kind;
-                                    _visiblePages = 1;
-                                  }),
-                              onSortChanged: (sort) =>
-                                  setState(() {
-                                    _sort = sort;
-                                    _visiblePages = 1;
-                                  }),
+                              onKindChanged: (kind) => setState(() {
+                                _kind = kind;
+                                _visiblePages = 1;
+                              }),
+                              onSortChanged: (sort) => setState(() {
+                                _sort = sort;
+                                _visiblePages = 1;
+                              }),
                               onClear: () {
                                 _searchController.clear();
                                 setState(() {
@@ -327,12 +409,31 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
     _selectedPaths.value = updated;
   }
 
+  void _selectVisibleFiles(List<ScannedFile> files) {
+    if (files.isEmpty) return;
+    final updated = Set<String>.of(_selectedPaths.value)
+      ..addAll(files.map((file) => file.path));
+    _selectedPaths.value = updated;
+  }
+
+  void _clearSelection() {
+    if (_selectedPaths.value.isEmpty) return;
+    _selectedPaths.value = <String>{};
+  }
+
   void _removeSelectedPaths(Iterable<String> paths) {
     final updated = Set<String>.of(_selectedPaths.value)..removeAll(paths);
     _selectedPaths.value = updated;
   }
 
   List<ScannedFile> _visibleFiles(List<ScannedFile> files) {
+    if (identical(files, _cachedSourceFiles) &&
+        _sort == _cachedSort &&
+        _kind == _cachedKind &&
+        _query == _cachedQuery) {
+      return _cachedVisibleFiles!;
+    }
+
     final visible = files
         .where((file) {
           if (!_matchesKind(file, _kind)) return false;
@@ -354,6 +455,11 @@ class _LargeFilesPageState extends ConsumerState<LargeFilesPage> {
       };
     });
 
+    _cachedSourceFiles = files;
+    _cachedSort = _sort;
+    _cachedKind = _kind;
+    _cachedQuery = _query;
+    _cachedVisibleFiles = visible;
     return visible;
   }
 }
@@ -374,58 +480,54 @@ class _HeaderCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    return Card(
-      elevation: 0,
-      color: colorScheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.folder_special_rounded,
-              color: colorScheme.onPrimaryContainer,
-              size: 32,
+    return SpaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.rocket_launch_rounded,
+            color: colorScheme.primary,
+            size: 32,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Launch a smart storage sweep',
+            style: textTheme.headlineSmall?.copyWith(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
             ),
-            const SizedBox(height: 14),
-            Text(
-              'Find the files taking the most space',
-              style: textTheme.headlineSmall?.copyWith(
-                color: colorScheme.onPrimaryContainer,
-                fontWeight: FontWeight.w800,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'SpacePilot scans your device orbit and surfaces the biggest storage hogs first.',
+            style: textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: isLoading ? null : onScanPressed,
+                icon: isLoading
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.3),
+                      )
+                    : const Icon(Icons.rocket_launch_rounded),
+                label: Text(isLoading ? 'Scanning...' : 'Launch scan'),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose a size threshold, scan storage, and review results sorted from largest to smallest.',
-              style: textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onPrimaryContainer.withValues(alpha: 0.74),
+              OutlinedButton.icon(
+                onPressed: onOpenScanner,
+                icon: const Icon(Icons.stacked_line_chart_rounded),
+                label: const Text('Open cockpit'),
               ),
-            ),
-            const SizedBox(height: 18),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  onPressed: isLoading ? null : onScanPressed,
-                  icon: isLoading
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2.3),
-                        )
-                      : const Icon(Icons.auto_awesome_rounded),
-                  label: Text(isLoading ? 'Scanning...' : 'Run AI Scan'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: onOpenScanner,
-                  icon: const Icon(Icons.radar_rounded),
-                  label: const Text('Open scanner'),
-                ),
-              ],
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -462,6 +564,9 @@ class _ThresholdPicker extends ConsumerWidget {
                 if (values.isEmpty) return;
                 ref.read(largeFileThresholdProvider.notifier).state =
                     values.first;
+                ref
+                    .read(appSettingsProvider.notifier)
+                    .setLargeFileThresholdBytes(values.first.bytes);
               },
             ),
           ),
@@ -691,7 +796,10 @@ class _LargeFileSliverList extends StatelessWidget {
     required this.selectedPaths,
     required this.isDeleting,
     required this.padding,
+    required this.selectedSourceFiles,
     required this.onFileChanged,
+    required this.onSelectVisible,
+    required this.onClearSelection,
     required this.onFileDetails,
     required this.onDeleteSelected,
     required this.history,
@@ -709,7 +817,10 @@ class _LargeFileSliverList extends StatelessWidget {
   final ValueListenable<Set<String>> selectedPaths;
   final bool isDeleting;
   final EdgeInsets padding;
+  final List<ScannedFile> selectedSourceFiles;
   final void Function(String path, bool selected) onFileChanged;
+  final VoidCallback onSelectVisible;
+  final VoidCallback onClearSelection;
   final ValueChanged<ScannedFile> onFileDetails;
   final VoidCallback onDeleteSelected;
   final List<_CleanupHistoryEntry> history;
@@ -755,7 +866,7 @@ class _LargeFileSliverList extends StatelessWidget {
       builder: (context, selectedPaths, _) {
         var selectedBytes = 0;
         var selectedCount = 0;
-        for (final file in files) {
+        for (final file in selectedSourceFiles) {
           if (!selectedPaths.contains(file.path)) continue;
           selectedBytes += file.size;
           selectedCount++;
@@ -764,7 +875,7 @@ class _LargeFileSliverList extends StatelessWidget {
         return SliverPadding(
           padding: padding,
           sliver: SliverList.builder(
-            itemCount: files.length + (hasMore ? 7 : 6),
+            itemCount: files.length + (hasMore ? 9 : 8),
             itemBuilder: (context, index) {
               if (index == 0) {
                 return Row(
@@ -802,6 +913,22 @@ class _LargeFileSliverList extends StatelessWidget {
 
               final footerIndex = fileIndex - (hasMore ? 1 : 0);
               if (footerIndex == files.length) {
+                return _SelectionToolbar(
+                  visibleCount: files.length,
+                  matchingCount: matchingFiles,
+                  selectedCount: selectedCount,
+                  selectedBytes: selectedBytes,
+                  onSelectVisible: onSelectVisible,
+                  onClearSelection: onClearSelection,
+                );
+              }
+              if (footerIndex == files.length + 1) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 2, bottom: 10),
+                  child: _LargeFileBriefingCard(files: files),
+                );
+              }
+              if (footerIndex == files.length + 2) {
                 return _DeleteSelectionCard(
                   selectedCount: selectedCount,
                   selectedBytes: selectedBytes,
@@ -809,19 +936,19 @@ class _LargeFileSliverList extends StatelessWidget {
                   onDelete: onDeleteSelected,
                 );
               }
-              if (footerIndex == files.length + 1) {
+              if (footerIndex == files.length + 3) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: _CleanupHistoryCard(history: history),
                 );
               }
-              if (footerIndex == files.length + 2) {
+              if (footerIndex == files.length + 4) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: filters,
                 );
               }
-              if (footerIndex == files.length + 3) {
+              if (footerIndex == files.length + 5) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
                   child: stats,
@@ -843,6 +970,193 @@ class _LargeFileSliverList extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _SelectionToolbar extends StatelessWidget {
+  const _SelectionToolbar({
+    required this.visibleCount,
+    required this.matchingCount,
+    required this.selectedCount,
+    required this.selectedBytes,
+    required this.onSelectVisible,
+    required this.onClearSelection,
+  });
+
+  final int visibleCount;
+  final int matchingCount;
+  final int selectedCount;
+  final int selectedBytes;
+  final VoidCallback onSelectVisible;
+  final VoidCallback onClearSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final allVisibleSelected = selectedCount >= visibleCount;
+
+    return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.64),
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Chip(
+              avatar: const Icon(Icons.fact_check_rounded, size: 18),
+              label: Text(
+                selectedCount == 0
+                    ? '$visibleCount ready to review'
+                    : '${_formatBytes(selectedBytes)} selected',
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: allVisibleSelected ? null : onSelectVisible,
+              icon: const Icon(Icons.select_all_rounded),
+              label: Text(
+                visibleCount == matchingCount
+                    ? 'Select all'
+                    : 'Select visible $visibleCount',
+              ),
+            ),
+            TextButton.icon(
+              onPressed: selectedCount == 0 ? null : onClearSelection,
+              icon: const Icon(Icons.remove_done_rounded),
+              label: const Text('Clear'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LargeFileBriefingCard extends StatelessWidget {
+  const _LargeFileBriefingCard({required this.files});
+
+  final List<ScannedFile> files;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalBytes = files.fold<int>(0, (total, file) => total + file.size);
+    final largestFile = files.reduce((a, b) => a.size >= b.size ? a : b);
+    final newestFile = files.reduce(
+      (a, b) => a.lastModified.isAfter(b.lastModified) ? a : b,
+    );
+    final videos = files.where((file) {
+      return _matchesKind(file, _LargeFileKind.video);
+    }).length;
+    final downloads = files.where((file) {
+      return _matchesKind(file, _LargeFileKind.download);
+    }).length;
+    final colorScheme = Theme.of(context).colorScheme;
+    final pressure = _reviewPressureForBytes(totalBytes);
+
+    return Card(
+      elevation: 0,
+      color: colorScheme.primaryContainer.withValues(alpha: 0.28),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.psychology_alt_rounded, color: colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Review briefing',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                _PressureBadge(label: pressure),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'This view holds ${_formatBytes(totalBytes)} across ${files.length} visible files. '
+              'Start with ${largestFile.filename}; it alone can free ${_formatBytes(largestFile.size)}.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                height: 1.32,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _BriefingPill(
+                  icon: Icons.movie_filter_rounded,
+                  label: '$videos video-heavy',
+                ),
+                _BriefingPill(
+                  icon: Icons.download_rounded,
+                  label: '$downloads downloads',
+                ),
+                _BriefingPill(
+                  icon: Icons.schedule_rounded,
+                  label: 'Newest ${_formatDate(newestFile.lastModified)}',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PressureBadge extends StatelessWidget {
+  const _PressureBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colorScheme.primary,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: colorScheme.onPrimary,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BriefingPill extends StatelessWidget {
+  const _BriefingPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Chip(
+      avatar: Icon(icon, size: 18, color: colorScheme.primary),
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
     );
   }
 }
@@ -921,10 +1235,7 @@ class _LargeFileCard extends StatelessWidget {
               value: selected,
               onChanged: (value) => onChanged(value ?? false),
             ),
-            _FilePreview(
-              file: file,
-              colorScheme: colorScheme,
-            ),
+            _FilePreview(file: file, colorScheme: colorScheme),
             const SizedBox(width: 4),
           ],
         ),
@@ -1286,7 +1597,14 @@ final class _CleanupHistoryEntry {
   final DateTime completedAt;
 }
 
-void _showFileDetails(BuildContext context, ScannedFile file) {
+void _showFileDetails(
+  BuildContext context,
+  ScannedFile file, {
+  required bool actionsSupported,
+  required Future<void> Function() onOpen,
+  required Future<void> Function() onShare,
+  required Future<void> Function() onMove,
+}) {
   final kind = _kindForFile(file);
 
   showModalBottomSheet<void>(
@@ -1329,6 +1647,73 @@ void _showFileDetails(BuildContext context, ScannedFile file) {
               ),
               _DetailRow(label: 'Folder', value: _parentDirectory(file.path)),
               _DetailRow(label: 'Path', value: file.path),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  FilledButton.icon(
+                    onPressed: actionsSupported ? onOpen : null,
+                    icon: const Icon(Icons.visibility_rounded),
+                    label: const Text('Preview'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: actionsSupported ? onShare : null,
+                    icon: const Icon(Icons.ios_share_rounded),
+                    label: const Text('Share'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: actionsSupported ? onMove : null,
+                    icon: const Icon(Icons.drive_file_move_rounded),
+                    label: const Text('Move'),
+                  ),
+                ],
+              ),
+              if (!actionsSupported) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'File actions are available on Android devices.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Future<LargeFileMoveDestination?> _showMoveDestinationPicker(
+  BuildContext context,
+) {
+  return showModalBottomSheet<LargeFileMoveDestination>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Move to',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              for (final destination in LargeFileMoveDestination.values)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.folder_rounded),
+                  title: Text(destination.label),
+                  onTap: () => Navigator.of(context).pop(destination),
+                ),
             ],
           ),
         ),
@@ -1369,10 +1754,28 @@ String _scanErrorMessage(Object error) {
   if (error is PlatformException && error.code == 'PERMISSION_DENIED') {
     return 'Storage and media access are required to scan your files.';
   }
+  if (error is TimeoutException) {
+    return 'The storage scan timed out. Please try again.';
+  }
   if (error is UnsupportedError) {
     return 'Large File Hunter scans Android storage only.';
   }
   return 'The storage scan could not be completed. Please try again.';
+}
+
+String _fileActionError(Object error) {
+  if (error is UnsupportedError) {
+    return error.message ?? 'File action is unsupported.';
+  }
+  if (error is PlatformException) {
+    return switch (error.code) {
+      'FILE_NOT_FOUND' => 'That file no longer exists.',
+      'NO_HANDLER' => 'No installed app can handle this file.',
+      'MOVE_FAILED' => 'The file could not be moved.',
+      _ => error.message ?? 'The file action could not be completed.',
+    };
+  }
+  return 'The file action could not be completed.';
 }
 
 Future<bool?> _showDeleteConfirmation(
@@ -1433,6 +1836,13 @@ String _formatBytes(int bytes) {
 
   final decimals = unit == 0 ? 0 : 1;
   return '${value.toStringAsFixed(decimals)} ${units[unit]}';
+}
+
+String _reviewPressureForBytes(int bytes) {
+  const gigabyte = 1024 * 1024 * 1024;
+  if (bytes >= 8 * gigabyte) return 'High impact';
+  if (bytes >= 2 * gigabyte) return 'Medium impact';
+  return 'Low impact';
 }
 
 String _formatDate(DateTime date) {

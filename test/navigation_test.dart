@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spacepilot/features/permissions/data/services/permission_service.dart';
 import 'package:spacepilot/features/permissions/presentation/providers/permission_service_provider.dart';
+import 'package:spacepilot/features/app_analyzer/data/services/app_analyzer_service.dart';
+import 'package:spacepilot/features/app_analyzer/presentation/providers/app_analyzer_provider.dart';
 import 'package:spacepilot/features/storage/data/services/storage_scanner_service.dart';
 import 'package:spacepilot/features/storage/domain/models/storage_stats.dart';
 import 'package:spacepilot/features/storage/presentation/providers/device_storage_provider.dart';
@@ -24,6 +26,9 @@ void main() {
     );
     final permissionChannel = MethodChannel(
       'spacepilot/permissions-test-${DateTime.now()}',
+    );
+    final appAnalyzerChannel = MethodChannel(
+      'spacepilot/app-analyzer-test-${DateTime.now()}',
     );
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       permissionChannel,
@@ -65,6 +70,18 @@ void main() {
         'scannedRootPaths': const ['/storage/emulated/0/Download'],
       };
     });
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      appAnalyzerChannel,
+      (call) async {
+        if (call.method != 'analyzeInstalledApps') return null;
+        return {
+          'apps': const [],
+          'hasUsageAccess': false,
+          'generatedAt': 0,
+          'limitations': const ['Usage access is off.'],
+        };
+      },
+    );
 
     late ProviderContainer container;
 
@@ -76,6 +93,9 @@ void main() {
           ),
           permissionServiceProvider.overrideWithValue(
             PermissionService(channel: permissionChannel),
+          ),
+          appAnalyzerServiceProvider.overrideWithValue(
+            AppAnalyzerService(channel: appAnalyzerChannel),
           ),
           deviceStorageStatsProvider.overrideWith(
             (ref) async => _storageStats(),
@@ -103,13 +123,21 @@ void main() {
 
     router.goNamed(AppRouteNames.onboarding);
     await _pumpRoute(tester);
-    expect(find.text('Smart Cleaning'), findsOneWidget);
+    expect(find.text('Real Storage Access'), findsOneWidget);
 
     router.goNamed(AppRouteNames.dashboard);
     await _pumpRoute(tester);
-    expect(find.text('Optimize'), findsOneWidget);
+    expect(find.text('Storage Overview'), findsOneWidget);
+
+    router.goNamed(AppRouteNames.deviceHealth);
+    await _pumpRoute(tester);
+    expect(find.text('Device Health'), findsWidgets);
 
     router.goNamed(AppRouteNames.scanResults);
+    await _pumpRoute(tester);
+    expect(find.text('Smart Scan'), findsOneWidget);
+
+    router.go('${AppRoutes.scanResults}?view=results');
     await _pumpRoute(tester);
     expect(find.text('AI Cleanup Scan'), findsOneWidget);
     expect(find.text('Cleanup review ready'), findsOneWidget);
@@ -122,6 +150,22 @@ void main() {
     router.goNamed(AppRouteNames.duplicates);
     await _pumpRoute(tester);
     expect(find.text('Duplicate Files'), findsOneWidget);
+
+    router.goNamed(AppRouteNames.similarImages);
+    await _pumpRoute(tester);
+    expect(find.text('Similar Images'), findsOneWidget);
+
+    router.goNamed(AppRouteNames.appAnalyzer);
+    await _pumpRoute(tester);
+    expect(find.text('App Analyzer'), findsOneWidget);
+
+    router.goNamed(AppRouteNames.storageTimeline);
+    await _pumpRoute(tester);
+    expect(find.text('Storage Timeline'), findsOneWidget);
+
+    router.goNamed(AppRouteNames.automation);
+    await _pumpRoute(tester);
+    expect(find.text('Automation'), findsOneWidget);
 
     router.goNamed(AppRouteNames.settings);
     await _pumpRoute(tester);

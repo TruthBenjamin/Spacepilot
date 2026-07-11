@@ -2,18 +2,52 @@ abstract final class AppRoutes {
   static const splash = '/';
   static const onboarding = '/onboarding';
   static const dashboard = '/dashboard';
+  static const recommendations = '/recommendations';
+  static const deviceHealth = '/device-health';
+  static const storageOverview = '/storage-overview';
+  static const storageFiles = '/storage-files';
   static const scanResults = '/scan-results';
   static const largeFiles = '/large-files';
   static const duplicates = '/duplicates';
+  static const similarImages = '/similar-images';
+  static const appAnalyzer = '/app-analyzer';
+  static const tools = '/tools';
+  static const storageTimeline = '/storage-timeline';
+  static const automation = '/automation';
+  static const recoveryBin = '/recovery-bin';
+  static const privacyCenter = '/privacy-center';
   static const settings = '/settings';
+  static const booster = '/booster';
+  static const cooling = '/cooling';
+  static const batteryOptimization = '/battery-optimization';
+  static const junkCleaner = '/junk-cleaner';
+  static const junkReview = '/junk-review';
+  static const networkAssistant = '/network-assistant';
 }
 
 abstract final class AppRouteNames {
   static const splash = 'splash';
   static const onboarding = 'onboarding';
   static const dashboard = 'dashboard';
+  static const recommendations = 'recommendations';
+  static const deviceHealth = 'device-health';
+  static const storageOverview = 'storage-overview';
+  static const storageFiles = 'storage-files';
   static const scanResults = 'scan-results';
   static const largeFiles = 'large-files';
   static const duplicates = 'duplicates';
+  static const similarImages = 'similar-images';
+  static const appAnalyzer = 'app-analyzer';
+  static const tools = 'tools';
+  static const storageTimeline = 'storage-timeline';
+  static const automation = 'automation';
+  static const recoveryBin = 'recovery-bin';
+  static const privacyCenter = 'privacy-center';
   static const settings = 'settings';
+  static const booster = 'booster';
+  static const cooling = 'cooling';
+  static const batteryOptimization = 'battery-optimization';
+  static const junkCleaner = 'junk-cleaner';
+  static const junkReview = 'junk-review';
+  static const networkAssistant = 'network-assistant';
 }

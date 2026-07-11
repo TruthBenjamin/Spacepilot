@@ -73,18 +73,37 @@ final class CleanupService {
     required bool userConfirmed,
   }) {
     final duplicateCopies = <File>[];
+    final result = _CleanupResultBuilder();
 
     for (final group in groups) {
-      // The first file is the retained original and is never deleted here.
-      duplicateCopies.addAll(
-        group.files
-            .skip(1)
-            .where((file) => selectedPaths.contains(file.path))
-            .map((file) => File(file.path)),
-      );
+      final selectedInGroup = group.files
+          .where((file) => selectedPaths.contains(file.path))
+          .toList(growable: false);
+      if (selectedInGroup.isEmpty) continue;
+
+      if (selectedInGroup.length >= group.files.length) {
+        for (final file in selectedInGroup) {
+          result.failures[file.path] =
+              'At least one copy from each duplicate group must be kept.';
+        }
+        continue;
+      }
+
+      duplicateCopies.addAll(selectedInGroup.map((file) => File(file.path)));
     }
 
-    return deleteFiles(duplicateCopies, userConfirmed: userConfirmed);
+    if (result.failures.isEmpty) {
+      return deleteFiles(duplicateCopies, userConfirmed: userConfirmed);
+    }
+
+    return deleteFiles(duplicateCopies, userConfirmed: userConfirmed).then((
+      cleanup,
+    ) {
+      result.deleted.addAll(cleanup.deletedPaths);
+      result.skipped.addAll(cleanup.skippedPaths);
+      result.failures.addAll(cleanup.failures);
+      return result.build();
+    });
   }
 
   Future<CleanupResult> deleteEmptyFolders(

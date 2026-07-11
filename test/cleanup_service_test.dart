@@ -105,7 +105,32 @@ void main() {
     expect(await protectedFile.exists(), isTrue);
   });
 
-  test('deleteDuplicates always keeps the first file in a group', () async {
+  test('deleteDuplicates deletes selected copies while preserving one file', () async {
+    final root = await Directory.systemTemp.createTemp('cleanup_duplicates_');
+    addTearDown(() => root.delete(recursive: true));
+    final original = await File(
+      '${root.path}/original.txt',
+    ).writeAsString('same');
+    final copy = await File('${root.path}/copy.txt').writeAsString('same');
+    final group = DuplicateGroup(
+      sha256Hash: 'hash',
+      sizeBytes: 4,
+      files: [_duplicateFile(original), _duplicateFile(copy)],
+    );
+    final service = CleanupService(allowedRootPaths: [root.absolute.path]);
+
+    final result = await service.deleteDuplicates(
+      [group],
+      selectedPaths: {original.path},
+      userConfirmed: true,
+    );
+
+    expect(result.deletedCount, 1);
+    expect(await original.exists(), isFalse);
+    expect(await copy.exists(), isTrue);
+  });
+
+  test('deleteDuplicates refuses to delete every copy in a group', () async {
     final root = await Directory.systemTemp.createTemp('cleanup_duplicates_');
     addTearDown(() => root.delete(recursive: true));
     final original = await File(
@@ -125,9 +150,10 @@ void main() {
       userConfirmed: true,
     );
 
-    expect(result.deletedCount, 1);
+    expect(result.deletedCount, 0);
+    expect(result.failures.length, 2);
     expect(await original.exists(), isTrue);
-    expect(await copy.exists(), isFalse);
+    expect(await copy.exists(), isTrue);
   });
 
   test('deleteEmptyFolders skips non-empty folders', () async {

@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
+import '../../data/services/large_file_action_service.dart';
 import '../../../storage/domain/models/scanned_file.dart';
 import '../../../storage/presentation/providers/storage_scan_provider.dart';
+import '../../../settings/presentation/providers/settings_provider.dart';
 
 enum LargeFileThreshold {
   mb100('100 MB', 100 * 1024 * 1024),
@@ -17,12 +19,20 @@ enum LargeFileThreshold {
 }
 
 final largeFileThresholdProvider = StateProvider<LargeFileThreshold>((ref) {
-  return LargeFileThreshold.mb100;
+  final configured = ref.watch(largeFileThresholdBytesSettingProvider);
+  return LargeFileThreshold.values.firstWhere(
+    (threshold) => threshold.bytes == configured,
+    orElse: () => LargeFileThreshold.mb100,
+  );
 });
 
 final largeFilePageProvider = StateProvider<int>((ref) => 0);
 
 const largeFilePageSize = 50;
+
+final largeFileActionServiceProvider = Provider<LargeFileActionService>((ref) {
+  return LargeFileActionService();
+});
 
 final largeFileHunterProvider = Provider<AsyncValue<List<ScannedFile>>>((ref) {
   final threshold = ref.watch(largeFileThresholdProvider);
@@ -41,31 +51,32 @@ final largeFileHunterProvider = Provider<AsyncValue<List<ScannedFile>>>((ref) {
   });
 });
 
-final pagedLargeFileHunterProvider =
-    Provider<AsyncValue<LargeFileHunterPage>>((ref) {
-      final page = ref.watch(largeFilePageProvider);
-      final largeFiles = ref.watch(largeFileHunterProvider);
+final pagedLargeFileHunterProvider = Provider<AsyncValue<LargeFileHunterPage>>((
+  ref,
+) {
+  final page = ref.watch(largeFilePageProvider);
+  final largeFiles = ref.watch(largeFileHunterProvider);
 
-      return largeFiles.whenData((files) {
-        final start = page * largeFilePageSize;
-        if (start >= files.length) {
-          return LargeFileHunterPage(
-            files: const [],
-            page: page,
-            pageSize: largeFilePageSize,
-            totalFiles: files.length,
-          );
-        }
+  return largeFiles.whenData((files) {
+    final start = page * largeFilePageSize;
+    if (start >= files.length) {
+      return LargeFileHunterPage(
+        files: const [],
+        page: page,
+        pageSize: largeFilePageSize,
+        totalFiles: files.length,
+      );
+    }
 
-        final end = (start + largeFilePageSize).clamp(0, files.length).toInt();
-        return LargeFileHunterPage(
-          files: files.sublist(start, end),
-          page: page,
-          pageSize: largeFilePageSize,
-          totalFiles: files.length,
-        );
-      });
-    });
+    final end = (start + largeFilePageSize).clamp(0, files.length).toInt();
+    return LargeFileHunterPage(
+      files: files.sublist(start, end),
+      page: page,
+      pageSize: largeFilePageSize,
+      totalFiles: files.length,
+    );
+  });
+});
 
 final class LargeFileHunterPage {
   const LargeFileHunterPage({

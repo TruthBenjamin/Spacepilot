@@ -1,34 +1,56 @@
 package ai.spacepilot.app
 
 import android.Manifest
+import android.app.ActivityManager
+import android.app.AppOpsManager
 import android.app.job.JobInfo
 import android.app.job.JobScheduler
+import android.app.usage.StorageStatsManager
+import android.app.usage.UsageStats
+import android.app.usage.UsageStatsManager
 import android.content.ComponentName
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.BatteryManager
+import android.os.PowerManager
+import android.os.Process
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.util.ArrayDeque
+import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : FlutterActivity() {
     private val scannerExecutor = Executors.newSingleThreadExecutor()
+    private val cancelStorageScan = AtomicBoolean(false)
     private var scannerChannel: MethodChannel? = null
     private var permissionChannel: MethodChannel? = null
     private var agentBackgroundChannel: MethodChannel? = null
     private var storageStatsChannel: MethodChannel? = null
     private var appPreferencesChannel: MethodChannel? = null
+    private var fileActionChannel: MethodChannel? = null
+    private var appAnalyzerChannel: MethodChannel? = null
+    private var powerThermalChannel: MethodChannel? = null
+    private var ramBoosterChannel: MethodChannel? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingPermissionKind: PermissionKind? = null
+    private var pendingNotificationResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,7 +62,14 @@ class MainActivity : FlutterActivity() {
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "scanStorage" -> beginLegacyScan(result)
-                    "scanStorageIntelligence" -> beginScan(result)
+                    "scanStorageIntelligence" -> beginScan(
+                        result,
+                        call.argument<Boolean>("includeHidden") == true,
+                    )
+                    "cancelStorageScan" -> {
+                        cancelStorageScan.set(true)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -59,6 +88,57 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            NOTIFICATIONS_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestPermission" -> requestNotificationPermission(result)
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            APP_INFO_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getVersion" -> {
+                    val info = packageManager.getPackageInfo(packageName, 0)
+                    result.success("${info.versionName ?: "0.0.0"}+${info.longVersionCode}")
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            BACKGROUND_WORK_CHANNEL,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "ensureRecoveryPurge" -> BackgroundWorkCoordinator.ensureRecoveryPurge(this)
+                "syncRecoveryPurge" -> BackgroundWorkCoordinator.syncRecoveryPurge(
+                    this,
+                    call.argument<Boolean>("enabled") == true,
+                )
+                "syncRule" -> BackgroundWorkCoordinator.syncRule(
+                    this,
+                    call.argument<Map<*, *>>("rule") ?: emptyMap<String, Any>(),
+                )
+                "syncScheduledScan" -> BackgroundWorkCoordinator.syncScheduledScan(
+                    this,
+                    call.argument<Boolean>("enabled") == true,
+                    (call.argument<Number>("frequencyDays")?.toLong() ?: 1L),
+                    (call.argument<Number>("initialDelayMs")?.toLong() ?: 0L),
+                )
+                "cancel" -> call.argument<String>("workName")?.let {
+                    BackgroundWorkCoordinator.cancel(this, it)
+                }
+                else -> { result.notImplemented(); return@setMethodCallHandler }
+            }
+            result.success(null)
         }
 
         agentBackgroundChannel = MethodChannel(
@@ -105,6 +185,118 @@ class MainActivity : FlutterActivity() {
                             .apply()
                         result.success(null)
                     }
+                    "getString" -> {
+                        val key = call.argument<String>("key")
+                        if (key.isNullOrBlank()) {
+                            result.error("INVALID_KEY", "Preference key was not provided", null)
+                        } else {
+                            result.success(appPreferences().getString(key, null))
+                        }
+                    }
+                    "setString" -> {
+                        val key = call.argument<String>("key")
+                        val value = call.argument<String>("value")
+                        if (key.isNullOrBlank()) {
+                            result.error("INVALID_KEY", "Preference key was not provided", null)
+                        } else {
+                            appPreferences().edit().putString(key, value ?: "").apply()
+                            result.success(null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        fileActionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            FILE_ACTIONS_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "openFile" -> openFile(call.argument("path"), result)
+                    "shareFile" -> shareFile(call.argument("path"), result)
+                    "moveFile" -> moveFile(
+                        call.argument("path"),
+                        call.argument("destination"),
+                        result,
+                    )
+                    "renameFile" -> renameFile(
+                        call.argument("path"),
+                        call.argument("filename"),
+                        result,
+                    )
+                    "moveToRecovery" -> moveToRecovery(
+                        call.argument("path"),
+                        call.argument("retentionDays"),
+                        result,
+                    )
+                    "restoreRecoveryItem" -> restoreRecoveryItem(
+                        call.argument("recoveryPath"),
+                        call.argument("originalPath"),
+                        result,
+                    )
+                    "deleteRecoveryItem" -> deleteRecoveryItem(
+                        call.argument("recoveryPath"),
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        appAnalyzerChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            APP_ANALYZER_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "analyzeInstalledApps" -> analyzeInstalledApps(result)
+                    "hasUsageAccess" -> result.success(hasUsageStatsAccess())
+                    "openUsageAccessSettings" -> openUsageAccessSettings(result)
+                    "openApp" -> openApp(call.argument("packageName"), result)
+                    "openAppInfo" -> openAppInfo(call.argument("packageName"), result)
+                    "requestUninstall" -> requestUninstall(
+                        call.argument("packageName"),
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        powerThermalChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            POWER_THERMAL_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getPowerThermalSnapshot" -> result.success(powerThermalSnapshot())
+                    "openBatterySaverSettings" -> openSystemSettings(
+                        Settings.ACTION_BATTERY_SAVER_SETTINGS,
+                        result,
+                    )
+                    "openBatteryUsageSettings" -> openSystemSettings(
+                        Intent.ACTION_POWER_USAGE_SUMMARY,
+                        result,
+                    )
+                    "openDisplaySettings" -> openSystemSettings(
+                        Settings.ACTION_DISPLAY_SETTINGS,
+                        result,
+                    )
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
+        ramBoosterChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            RAM_BOOSTER_CHANNEL,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getMemorySnapshot" -> result.success(memorySnapshot())
+                    "boostRam" -> boostRam(result)
                     else -> result.notImplemented()
                 }
             }
@@ -125,6 +317,14 @@ class MainActivity : FlutterActivity() {
         storageStatsChannel = null
         appPreferencesChannel?.setMethodCallHandler(null)
         appPreferencesChannel = null
+        fileActionChannel?.setMethodCallHandler(null)
+        fileActionChannel = null
+        appAnalyzerChannel?.setMethodCallHandler(null)
+        appAnalyzerChannel = null
+        powerThermalChannel?.setMethodCallHandler(null)
+        powerThermalChannel = null
+        ramBoosterChannel?.setMethodCallHandler(null)
+        ramBoosterChannel = null
         permissionChannel?.setMethodCallHandler(null)
         permissionChannel = null
         scannerChannel?.setMethodCallHandler(null)
@@ -133,9 +333,59 @@ class MainActivity : FlutterActivity() {
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
-    private fun beginScan(result: MethodChannel.Result) {
+    private fun powerThermalSnapshot(): Map<String, Any?> {
+        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = battery?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = battery?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val temperatureTenths = battery?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val health = battery?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        return mapOf(
+            "capturedAt" to System.currentTimeMillis(),
+            "batteryLevel" to if (level >= 0 && scale > 0) (level * 100 / scale) else null,
+            "charging" to (status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL),
+            "plugged" to (plugged != 0),
+            "powerSource" to when (plugged) {
+                BatteryManager.BATTERY_PLUGGED_AC -> "ac"
+                BatteryManager.BATTERY_PLUGGED_USB -> "usb"
+                BatteryManager.BATTERY_PLUGGED_WIRELESS -> "wireless"
+                else -> if (plugged == 0) "battery" else "unknown"
+            },
+            "powerSaveMode" to powerManager.isPowerSaveMode,
+            "batteryTemperatureCelsius" to if (temperatureTenths >= 0) {
+                temperatureTenths / 10.0
+            } else null,
+            "batteryHealth" to batteryHealthName(health),
+            "thermalStatus" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                powerManager.currentThermalStatus
+            } else null,
+            "thermalStatusSupported" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q),
+        )
+    }
+
+    private fun batteryHealthName(health: Int): String? = when (health) {
+        BatteryManager.BATTERY_HEALTH_GOOD -> "good"
+        BatteryManager.BATTERY_HEALTH_OVERHEAT -> "overheat"
+        BatteryManager.BATTERY_HEALTH_DEAD -> "dead"
+        BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "overVoltage"
+        BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "failure"
+        BatteryManager.BATTERY_HEALTH_COLD -> "cold"
+        else -> null
+    }
+
+    private fun openSystemSettings(action: String, result: MethodChannel.Result) {
+        runCatching { startActivity(Intent(action)) }
+            .onSuccess { result.success(null) }
+            .onFailure { result.error("SETTINGS_UNAVAILABLE", "System settings are unavailable", null) }
+    }
+
+    private fun beginScan(result: MethodChannel.Result, includeHidden: Boolean) {
         if (hasStoragePermission()) {
-            executeScan(result)
+            executeScan(result, includeHidden)
         } else {
             result.error("PERMISSION_DENIED", "Storage access was not granted", null)
         }
@@ -149,9 +399,10 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun executeScan(result: MethodChannel.Result) {
+    private fun executeScan(result: MethodChannel.Result, includeHidden: Boolean) {
+        cancelStorageScan.set(false)
         scannerExecutor.execute {
-            runCatching { scanStorageIntelligence() }
+            runCatching { scanStorageIntelligence(includeHidden) }
                 .onSuccess { report -> runOnUiThread { result.success(report) } }
                 .onFailure { error ->
                     runOnUiThread {
@@ -162,6 +413,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun executeLegacyScan(result: MethodChannel.Result) {
+        cancelStorageScan.set(false)
         scannerExecutor.execute {
             runCatching { scanStorageIntelligence()["files"] ?: emptyList<Map<String, Any>>() }
                 .onSuccess { files -> runOnUiThread { result.success(files) } }
@@ -187,6 +439,31 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == STORAGE_PERMISSION_REQUEST) completePermissionRequest()
         if (requestCode == MEDIA_PERMISSION_REQUEST) completePermissionRequest()
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            pendingNotificationResult?.success(hasNotificationPermission())
+            pendingNotificationResult = null
+        }
+    }
+
+    private fun hasNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            hasPermission(Manifest.permission.POST_NOTIFICATIONS)
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (hasNotificationPermission()) {
+            result.success(true)
+            return
+        }
+        if (pendingNotificationResult != null) {
+            result.error("REQUEST_IN_PROGRESS", "A notification permission request is already active", null)
+            return
+        }
+        pendingNotificationResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_PERMISSION_REQUEST,
+        )
     }
 
     private fun completePermissionRequest() {
@@ -238,6 +515,592 @@ class MainActivity : FlutterActivity() {
         requestPermissions(mediaReadPermissions(), MEDIA_PERMISSION_REQUEST)
     }
 
+    private fun openFile(path: String?, result: MethodChannel.Result) {
+        val file = validatedFile(path)
+        if (file == null) {
+            result.error("FILE_NOT_FOUND", "File was not found", null)
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(fileUri(file), mimeType(file))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        runCatching { startActivity(intent) }
+            .onSuccess { result.success(null) }
+            .onFailure {
+                result.error("NO_HANDLER", "No app can open this file", null)
+            }
+    }
+
+    private fun shareFile(path: String?, result: MethodChannel.Result) {
+        val file = validatedFile(path)
+        if (file == null) {
+            result.error("FILE_NOT_FOUND", "File was not found", null)
+            return
+        }
+
+        val uri = fileUri(file)
+        val intent = Intent(Intent.ACTION_SEND)
+            .setType(mimeType(file))
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        runCatching { startActivity(Intent.createChooser(intent, "Share file")) }
+            .onSuccess { result.success(null) }
+            .onFailure {
+                result.error("NO_HANDLER", "No app can share this file", null)
+            }
+    }
+
+    private fun moveFile(
+        path: String?,
+        destination: String?,
+        result: MethodChannel.Result,
+    ) {
+        val source = validatedFile(path)
+        if (source == null) {
+            result.error("FILE_NOT_FOUND", "File was not found", null)
+            return
+        }
+        val destinationRoot = destinationRoot(destination)
+        if (destinationRoot == null) {
+            result.error("MOVE_FAILED", "Destination is not supported", null)
+            return
+        }
+
+        scannerExecutor.execute {
+            runCatching {
+                destinationRoot.mkdirs()
+                if (!destinationRoot.isDirectory) {
+                    error("Destination folder is unavailable")
+                }
+
+                val target = availableDestinationFile(destinationRoot, source.name)
+                val moved = source.renameTo(target)
+                if (!moved) {
+                    source.copyTo(target, overwrite = false)
+                    if (!source.delete()) {
+                        target.delete()
+                        error("Original file could not be removed")
+                    }
+                }
+
+                mapOf(
+                    "path" to target.absolutePath,
+                    "filename" to target.name,
+                )
+            }.onSuccess { payload ->
+                runOnUiThread { result.success(payload) }
+            }.onFailure { error ->
+                runOnUiThread {
+                    result.error("MOVE_FAILED", error.message ?: "File could not be moved", null)
+                }
+            }
+        }
+    }
+
+    private fun renameFile(
+        path: String?,
+        filename: String?,
+        result: MethodChannel.Result,
+    ) {
+        val source = validatedFile(path)
+        if (source == null) {
+            result.error("FILE_NOT_FOUND", "File was not found", null)
+            return
+        }
+        if (!isValidFilename(filename)) {
+            result.error("INVALID_NAME", "Filename is invalid", null)
+            return
+        }
+
+        scannerExecutor.execute {
+            runCatching {
+                val target = File(source.parentFile, filename!!)
+                if (target.exists()) {
+                    error("A file with that name already exists")
+                }
+                moveOrCopyDelete(source, target)
+                mapOf(
+                    "path" to target.absolutePath,
+                    "filename" to target.name,
+                )
+            }.onSuccess { payload ->
+                runOnUiThread { result.success(payload) }
+            }.onFailure { error ->
+                runOnUiThread {
+                    result.error("RENAME_FAILED", error.message ?: "File could not be renamed", null)
+                }
+            }
+        }
+    }
+
+    private fun moveToRecovery(
+        path: String?,
+        retentionDays: Int?,
+        result: MethodChannel.Result,
+    ) {
+        val source = validatedFile(path)
+        if (source == null) {
+            result.error("FILE_NOT_FOUND", "File was not found", null)
+            return
+        }
+
+        scannerExecutor.execute {
+            runCatching {
+                val root = recoveryRoot()
+                root.mkdirs()
+                if (!root.isDirectory) {
+                    error("Recovery storage is unavailable")
+                }
+
+                val now = System.currentTimeMillis()
+                val days = (retentionDays ?: 30).coerceIn(7, 90)
+                val id = "${now}_${UUID.randomUUID()}"
+                val target = availableDestinationFile(root, "${id}_${source.name}")
+                val sizeBytes = source.length().coerceAtLeast(0L)
+                val originalPath = source.absolutePath
+                moveOrCopyDelete(source, target)
+
+                mapOf(
+                    "id" to id,
+                    "filename" to source.name,
+                    "originalPath" to originalPath,
+                    "recoveryPath" to target.absolutePath,
+                    "sizeBytes" to sizeBytes,
+                    "deletedAt" to now,
+                    "expiresAt" to now + days * MILLIS_PER_DAY,
+                )
+            }.onSuccess { payload ->
+                runOnUiThread { result.success(payload) }
+            }.onFailure { error ->
+                runOnUiThread {
+                    result.error(
+                        "RECOVERY_FAILED",
+                        error.message ?: "File could not be moved to Recovery Bin",
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun restoreRecoveryItem(
+        recoveryPath: String?,
+        originalPath: String?,
+        result: MethodChannel.Result,
+    ) {
+        val source = validatedRecoveryFile(recoveryPath)
+        if (source == null || originalPath.isNullOrBlank()) {
+            result.error("FILE_NOT_FOUND", "Recovery item was not found", null)
+            return
+        }
+
+        scannerExecutor.execute {
+            runCatching {
+                val requested = File(originalPath)
+                val destinationRoot = requested.parentFile ?: error("Original folder is unavailable")
+                destinationRoot.mkdirs()
+                if (!destinationRoot.isDirectory) {
+                    error("Original folder is unavailable")
+                }
+
+                val target = availableDestinationFile(destinationRoot, requested.name)
+                moveOrCopyDelete(source, target)
+                mapOf(
+                    "path" to target.absolutePath,
+                    "filename" to target.name,
+                )
+            }.onSuccess { payload ->
+                runOnUiThread { result.success(payload) }
+            }.onFailure { error ->
+                runOnUiThread {
+                    result.error("RESTORE_FAILED", error.message ?: "File could not be restored", null)
+                }
+            }
+        }
+    }
+
+    private fun deleteRecoveryItem(
+        recoveryPath: String?,
+        result: MethodChannel.Result,
+    ) {
+        val file = validatedRecoveryFile(recoveryPath)
+        if (file == null) {
+            result.error("FILE_NOT_FOUND", "Recovery item was not found", null)
+            return
+        }
+
+        scannerExecutor.execute {
+            runCatching {
+                if (!file.delete()) {
+                    error("Recovery item could not be deleted")
+                }
+            }.onSuccess {
+                runOnUiThread { result.success(null) }
+            }.onFailure { error ->
+                runOnUiThread {
+                    result.error("DELETE_FAILED", error.message ?: "Recovery item could not be deleted", null)
+                }
+            }
+        }
+    }
+
+    private fun analyzeInstalledApps(result: MethodChannel.Result) {
+        scannerExecutor.execute {
+            runCatching { installedAppsReport() }
+                .onSuccess { report -> runOnUiThread { result.success(report) } }
+                .onFailure { error ->
+                    runOnUiThread {
+                        result.error(
+                            "APP_ANALYSIS_FAILED",
+                            error.message ?: "Installed app analysis failed",
+                            null,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun boostRam(result: MethodChannel.Result) {
+        scannerExecutor.execute {
+            runCatching { ramBoostReport() }
+                .onSuccess { report -> runOnUiThread { result.success(report) } }
+                .onFailure { error ->
+                    runOnUiThread {
+                        result.error(
+                            "RAM_BOOST_FAILED",
+                            error.message ?: "RAM boost failed",
+                            null,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun ramBoostReport(): Map<String, Any> {
+        val before = memorySnapshot()
+        val optimizedPackages = mutableListOf<String>()
+        val skippedPackages = mutableListOf<String>()
+
+        onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        System.gc()
+
+        candidatePackagesForRamBoost().forEach { candidate ->
+            if (candidate == packageName) {
+                skippedPackages += candidate
+                return@forEach
+            }
+            runCatching {
+                val appInfo = packageManager.getApplicationInfo(candidate, 0)
+                val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                if (isSystemApp) {
+                    skippedPackages += candidate
+                } else {
+                    val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    manager.killBackgroundProcesses(candidate)
+                    optimizedPackages += candidate
+                }
+            }.onFailure {
+                skippedPackages += candidate
+            }
+        }
+
+        Thread.sleep(350L)
+        val after = memorySnapshot()
+        return mapOf(
+            "before" to before,
+            "after" to after,
+            "optimizedAppCount" to optimizedPackages.size,
+            "optimizedPackages" to optimizedPackages,
+            "skippedPackages" to skippedPackages,
+            "limitations" to listOf(
+                "Android may restart needed apps and does not allow third-party apps to force-stop protected processes.",
+            ),
+        )
+    }
+
+    private fun memorySnapshot(): Map<String, Any> {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        return mapOf(
+            "totalBytes" to info.totalMem.coerceAtLeast(0L),
+            "availableBytes" to info.availMem.coerceAtLeast(0L),
+            "lowMemory" to info.lowMemory,
+            "thresholdBytes" to info.threshold.coerceAtLeast(0L),
+            "capturedAt" to System.currentTimeMillis(),
+        )
+    }
+
+    private fun candidatePackagesForRamBoost(): Set<String> {
+        val launchIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+        val launchablePackages = packageManager
+            .queryIntentActivities(launchIntent, 0)
+            .map { it.activityInfo.packageName }
+            .filter { it != packageName }
+            .toSet()
+
+        if (!hasUsageStatsAccess()) return launchablePackages.take(MAX_RAM_BOOST_PACKAGES).toSet()
+
+        val now = System.currentTimeMillis()
+        val recentCutoff = now - RAM_BOOST_RECENT_APP_WINDOW_MS
+        val usageByPackage = usageStatsByPackage()
+        return launchablePackages
+            .sortedWith(
+                compareByDescending<String> { usageByPackage[it]?.lastTimeUsed ?: 0L },
+            )
+            .filter { packageName ->
+                val usage = usageByPackage[packageName]
+                usage == null || usage.lastTimeUsed < recentCutoff
+            }
+            .take(MAX_RAM_BOOST_PACKAGES)
+            .toSet()
+    }
+
+    private fun installedAppsReport(): Map<String, Any> {
+        val usageAccess = hasUsageStatsAccess()
+        val usageByPackage = if (usageAccess) usageStatsByPackage() else emptyMap()
+        val launchIntent = Intent(Intent.ACTION_MAIN, null).addCategory(Intent.CATEGORY_LAUNCHER)
+        val launchablePackages = packageManager
+            .queryIntentActivities(launchIntent, 0)
+            .map { it.activityInfo.packageName }
+            .toSet()
+
+        val apps = launchablePackages.mapNotNull { packageName ->
+            runCatching {
+                val packageInfo = packageManager.getPackageInfo(packageName, 0)
+                val appInfo = packageInfo.applicationInfo ?: return@runCatching null
+                val usage = usageByPackage[packageName]
+                val storage = appStorageFor(packageName, appInfo)
+                mapOf(
+                    "packageName" to packageName,
+                    "appName" to appInfo.loadLabel(packageManager).toString(),
+                    "versionName" to (packageInfo.versionName ?: ""),
+                    "versionCode" to packageInfo.longVersionCode,
+                    "firstInstallTime" to packageInfo.firstInstallTime,
+                    "lastUpdateTime" to packageInfo.lastUpdateTime,
+                    "isSystemApp" to ((appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0),
+                    "canLaunch" to (packageManager.getLaunchIntentForPackage(packageName) != null),
+                    "hasUsageAccess" to usageAccess,
+                    "appSizeBytes" to storage.appBytes,
+                    "dataSizeBytes" to storage.dataBytes,
+                    "cacheSizeBytes" to storage.cacheBytes,
+                    "totalSizeBytes" to storage.totalBytes,
+                    "lastUsedTime" to (usage?.lastTimeUsed ?: 0L),
+                    "usageTimeMillis" to (usage?.totalTimeInForeground ?: 0L),
+                )
+            }.getOrNull()
+        }.filterNotNull()
+            .sortedWith(compareBy<Map<String, Any>> { (it["appName"] as String).lowercase() })
+
+        val limitations = mutableListOf(
+            "Android package visibility limits this list to apps SpacePilot can legitimately query.",
+            "Cache clearing and force-stop controls are not exposed because Android reserves them for system apps.",
+        )
+        if (!usageAccess) {
+            limitations += "Grant Usage Access to show last-used times and more complete app storage where Android supports it."
+        }
+
+        return mapOf(
+            "apps" to apps,
+            "hasUsageAccess" to usageAccess,
+            "generatedAt" to System.currentTimeMillis(),
+            "limitations" to limitations,
+        )
+    }
+
+    private fun usageStatsByPackage(): Map<String, UsageStats> {
+        val manager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val end = System.currentTimeMillis()
+        val start = end - APP_USAGE_WINDOW_MS
+        return manager.queryAndAggregateUsageStats(start, end)
+    }
+
+    private fun appStorageFor(packageName: String, appInfo: ApplicationInfo): AppStorageSnapshot {
+        val apkBytes = runCatching { File(appInfo.sourceDir).length().coerceAtLeast(0L) }
+            .getOrDefault(0L)
+
+        if (!hasUsageStatsAccess()) {
+            return AppStorageSnapshot(appBytes = apkBytes)
+        }
+
+        return try {
+            val manager = getSystemService(Context.STORAGE_STATS_SERVICE) as StorageStatsManager
+            val stats = manager.queryStatsForPackage(
+                android.os.storage.StorageManager.UUID_DEFAULT,
+                packageName,
+                Process.myUserHandle(),
+            )
+            AppStorageSnapshot(
+                appBytes = stats.appBytes.coerceAtLeast(apkBytes),
+                dataBytes = stats.dataBytes.coerceAtLeast(0L),
+                cacheBytes = stats.cacheBytes.coerceAtLeast(0L),
+            )
+        } catch (_: SecurityException) {
+            AppStorageSnapshot(appBytes = apkBytes)
+        } catch (_: IOException) {
+            AppStorageSnapshot(appBytes = apkBytes)
+        } catch (_: RuntimeException) {
+            AppStorageSnapshot(appBytes = apkBytes)
+        }
+    }
+
+    private fun hasUsageStatsAccess(): Boolean {
+        val appOps = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                packageName,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(
+                AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(),
+                packageName,
+            )
+        }
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun openUsageAccessSettings(result: MethodChannel.Result) {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }.onSuccess {
+            result.success(null)
+        }.onFailure {
+            result.error("NO_HANDLER", "Usage Access settings could not be opened", null)
+        }
+    }
+
+    private fun openApp(packageName: String?, result: MethodChannel.Result) {
+        if (packageName.isNullOrBlank()) {
+            result.error("APP_NOT_FOUND", "App package was not provided", null)
+            return
+        }
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        if (intent == null) {
+            result.error("APP_NOT_FOUND", "App cannot be opened", null)
+            return
+        }
+        runCatching { startActivity(intent) }
+            .onSuccess { result.success(null) }
+            .onFailure { result.error("NO_HANDLER", "App could not be opened", null) }
+    }
+
+    private fun openAppInfo(packageName: String?, result: MethodChannel.Result) {
+        if (packageName.isNullOrBlank()) {
+            result.error("APP_NOT_FOUND", "App package was not provided", null)
+            return
+        }
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            .setData(Uri.parse("package:$packageName"))
+        runCatching { startActivity(intent) }
+            .onSuccess { result.success(null) }
+            .onFailure { result.error("NO_HANDLER", "App info could not be opened", null) }
+    }
+
+    private fun requestUninstall(packageName: String?, result: MethodChannel.Result) {
+        if (packageName.isNullOrBlank()) {
+            result.error("APP_NOT_FOUND", "App package was not provided", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_DELETE)
+            .setData(Uri.parse("package:$packageName"))
+        runCatching { startActivity(intent) }
+            .onSuccess { result.success(null) }
+            .onFailure { result.error("NO_HANDLER", "Uninstall flow could not be opened", null) }
+    }
+
+    private fun validatedFile(path: String?): File? {
+        if (path.isNullOrBlank()) return null
+
+        val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        if (!file.isFile) return null
+        return file
+    }
+
+    private fun validatedRecoveryFile(path: String?): File? {
+        if (path.isNullOrBlank()) return null
+
+        val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        val root = runCatching { recoveryRoot().canonicalFile }.getOrNull() ?: return null
+        if (!file.isFile || !isInside(file, root)) return null
+        return file
+    }
+
+    private fun isValidFilename(filename: String?): Boolean {
+        if (filename.isNullOrBlank()) return false
+        if (filename == "." || filename == "..") return false
+        return !filename.contains("/") && !filename.contains("\\")
+    }
+
+    private fun recoveryRoot(): File {
+        return File(getExternalFilesDir(null) ?: filesDir, "recovery_bin")
+    }
+
+    private fun moveOrCopyDelete(source: File, target: File) {
+        target.parentFile?.mkdirs()
+        val moved = source.renameTo(target)
+        if (!moved) {
+            source.copyTo(target, overwrite = false)
+            if (!source.delete()) {
+                target.delete()
+                error("Original file could not be removed")
+            }
+        }
+    }
+
+    private fun fileUri(file: File): Uri {
+        return FileProvider.getUriForFile(
+            this,
+            "$packageName.fileprovider",
+            file,
+        )
+    }
+
+    private fun mimeType(file: File): String {
+        val extension = file.extension.lowercase()
+        if (extension.isBlank()) return "application/octet-stream"
+
+        return android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(extension)
+            ?: "application/octet-stream"
+    }
+
+    private fun destinationRoot(destination: String?): File? {
+        val directoryType = when (destination) {
+            "downloads" -> Environment.DIRECTORY_DOWNLOADS
+            "dcim" -> Environment.DIRECTORY_DCIM
+            "movies" -> Environment.DIRECTORY_MOVIES
+            "pictures" -> Environment.DIRECTORY_PICTURES
+            else -> return null
+        }
+
+        return runCatching {
+            Environment.getExternalStoragePublicDirectory(directoryType).canonicalFile
+        }.getOrNull()
+    }
+
+    private fun availableDestinationFile(root: File, filename: String): File {
+        val initial = File(root, filename)
+        if (!initial.exists()) return initial
+
+        val dotIndex = filename.lastIndexOf('.')
+        val base = if (dotIndex > 0) filename.substring(0, dotIndex) else filename
+        val extension = if (dotIndex > 0) filename.substring(dotIndex) else ""
+
+        var index = 1
+        while (true) {
+            val candidate = File(root, "$base ($index)$extension")
+            if (!candidate.exists()) return candidate
+            index += 1
+        }
+    }
+
     private fun startPermissionRequest(
         result: MethodChannel.Result,
         kind: PermissionKind,
@@ -252,7 +1115,7 @@ class MainActivity : FlutterActivity() {
         return true
     }
 
-    private fun scanStorageIntelligence(): Map<String, Any> {
+    private fun scanStorageIntelligence(includeHidden: Boolean = false): Map<String, Any> {
         val startedAt = System.currentTimeMillis()
         val files = mutableListOf<Map<String, Any>>()
         val folderAccumulators = mutableMapOf<String, FolderAccumulator>()
@@ -260,15 +1123,25 @@ class MainActivity : FlutterActivity() {
         val emptyFolders = mutableListOf<Map<String, Any>>()
         val scannedRootPaths = mutableListOf<String>()
 
-        scanRoots().forEach { root ->
-            val canonicalRoot = runCatching { root.canonicalFile }.getOrNull()
-                ?: return@forEach
-            if (!canonicalRoot.exists() || !canonicalRoot.isDirectory) return@forEach
+        val roots = SCANNED_FOLDERS.mapNotNull { directoryType ->
+            runCatching { Environment.getExternalStoragePublicDirectory(directoryType).canonicalFile }
+                .getOrNull()
+        }.distinctBy { it.absolutePath }
 
-            scannedRootPaths += canonicalRoot.absolutePath
-            val pending = ArrayDeque<File>().apply { add(canonicalRoot) }
+        roots.forEachIndexed { rootIndex, root ->
+            if (cancelStorageScan.get()) return@forEachIndexed
+            reportStorageScanProgress(
+                fraction = 0.05 + (rootIndex.toDouble() / roots.size.coerceAtLeast(1)) * 0.9,
+                filesAnalyzed = files.size,
+                bytesAnalyzed = files.sumOf { (it["size"] as? Long) ?: 0L },
+                scannedRootCount = scannedRootPaths.size,
+            )
+            if (!root.exists() || !root.isDirectory) return@forEachIndexed
 
-            while (pending.isNotEmpty()) {
+            scannedRootPaths += root.absolutePath
+            val pending = ArrayDeque<File>().apply { add(root) }
+
+            while (pending.isNotEmpty() && !cancelStorageScan.get()) {
                 val current = pending.removeLast()
                 val entries = current.listFiles()
                 if (entries != null && entries.isEmpty()) {
@@ -278,11 +1151,13 @@ class MainActivity : FlutterActivity() {
                     )
                 }
                 entries?.forEach { entry ->
+                    if (cancelStorageScan.get()) return@forEach
+                    if (!includeHidden && entry.name.startsWith(".")) return@forEach
                     if (Files.isSymbolicLink(entry.toPath())) return@forEach
 
                     val canonicalEntry = runCatching { entry.canonicalFile }.getOrNull()
                         ?: return@forEach
-                    if (!isInside(canonicalEntry, canonicalRoot)) return@forEach
+                    if (!isInside(canonicalEntry, root)) return@forEach
 
                     if (canonicalEntry.isDirectory) {
                         pending.add(canonicalEntry)
@@ -310,7 +1185,7 @@ class MainActivity : FlutterActivity() {
                         files += file
                         addFileToFolders(
                             canonicalEntry.parentFile,
-                            canonicalRoot,
+                            root,
                             sizeBytes,
                             lastModified,
                             folderAccumulators,
@@ -325,6 +1200,12 @@ class MainActivity : FlutterActivity() {
                     }
                 }
             }
+            reportStorageScanProgress(
+                fraction = 0.05 + ((rootIndex + 1).toDouble() / roots.size.coerceAtLeast(1)) * 0.9,
+                filesAnalyzed = files.size,
+                bytesAnalyzed = files.sumOf { (it["size"] as? Long) ?: 0L },
+                scannedRootCount = scannedRootPaths.size,
+            )
         }
 
         val largestFolders = folderAccumulators.entries
@@ -355,7 +1236,27 @@ class MainActivity : FlutterActivity() {
             "categorySummaries" to summaries,
             "scannedRootPaths" to scannedRootPaths.distinct(),
             "completedAt" to System.currentTimeMillis(),
+            "cancelled" to cancelStorageScan.get(),
         )
+    }
+
+    private fun reportStorageScanProgress(
+        fraction: Double,
+        filesAnalyzed: Int,
+        bytesAnalyzed: Long,
+        scannedRootCount: Int,
+    ) {
+        runOnUiThread {
+            scannerChannel?.invokeMethod(
+                "storageScanProgress",
+                mapOf(
+                    "fraction" to fraction.coerceIn(0.0, 1.0),
+                    "filesAnalyzed" to filesAnalyzed,
+                    "bytesAnalyzed" to bytesAnalyzed,
+                    "scannedRootCount" to scannedRootCount,
+                ),
+            )
+        }
     }
 
     private fun scanStorage(): List<Map<String, Any>> {
@@ -574,18 +1475,39 @@ class MainActivity : FlutterActivity() {
         var totalBytes: Long = 0L,
     )
 
+    private data class AppStorageSnapshot(
+        val appBytes: Long = 0L,
+        val dataBytes: Long = 0L,
+        val cacheBytes: Long = 0L,
+    ) {
+        val totalBytes: Long
+            get() = appBytes + dataBytes
+    }
+
     private companion object {
         const val STORAGE_SCANNER_CHANNEL = "ai.spacepilot.app/storage_scanner"
         const val PERMISSIONS_CHANNEL = "ai.spacepilot.app/permissions"
+        const val NOTIFICATIONS_CHANNEL = "ai.spacepilot.app/notifications"
+        const val BACKGROUND_WORK_CHANNEL = "ai.spacepilot.app/background_work"
+        const val APP_INFO_CHANNEL = "ai.spacepilot.app/app_info"
         const val AGENT_BACKGROUND_CHANNEL = "ai.spacepilot.app/agent_background"
         const val STORAGE_STATS_CHANNEL = "ai.spacepilot.app/storage_stats"
         const val APP_PREFERENCES_CHANNEL = "ai.spacepilot.app/preferences"
+        const val FILE_ACTIONS_CHANNEL = "ai.spacepilot.app/file_actions"
+        const val APP_ANALYZER_CHANNEL = "ai.spacepilot.app/app_analyzer"
+        const val POWER_THERMAL_CHANNEL = "ai.spacepilot.app/power_thermal"
+        const val RAM_BOOSTER_CHANNEL = "ai.spacepilot.app/ram_booster"
         const val APP_PREFS = "spacepilot_app_preferences"
         const val ONBOARDING_COMPLETED_KEY = "onboarding_completed"
         const val STORAGE_PERMISSION_REQUEST = 4102
         const val MEDIA_PERMISSION_REQUEST = 4103
+        const val NOTIFICATION_PERMISSION_REQUEST = 4104
         const val AGENT_MONITORING_JOB_ID = 4201
         const val AGENT_MONITORING_INTERVAL_MS = 60L * 60L * 1000L
+        const val MILLIS_PER_DAY = 24L * 60L * 60L * 1000L
+        const val APP_USAGE_WINDOW_MS = 180L * 24L * 60L * 60L * 1000L
+        const val RAM_BOOST_RECENT_APP_WINDOW_MS = 30L * 60L * 1000L
+        const val MAX_RAM_BOOST_PACKAGES = 24
         const val MAX_REPORTED_FOLDERS = 50
         val STORAGE_CATEGORIES = listOf(
             "image",

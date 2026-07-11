@@ -41,6 +41,34 @@ final class ScheduledScanConfig {
     return candidate;
   }
 
+  Map<String, Object?> toJson() => {
+    'enabled': enabled,
+    'frequency': frequency.name,
+    'minutesAfterMidnight': minutesAfterMidnight,
+    'lastRunAt': lastRunAt?.millisecondsSinceEpoch,
+  };
+
+  static ScheduledScanConfig fromJson(Object? value) {
+    if (value is! Map<String, Object?>) {
+      return const ScheduledScanConfig.defaults();
+    }
+    final minutes = value['minutesAfterMidnight'];
+    final lastRun = value['lastRunAt'];
+    return ScheduledScanConfig(
+      enabled: value['enabled'] == true,
+      frequency: ScheduledScanFrequency.values.firstWhere(
+        (frequency) => frequency.name == value['frequency'],
+        orElse: () => ScheduledScanFrequency.weekly,
+      ),
+      minutesAfterMidnight: minutes is num
+          ? minutes.round().clamp(0, 1439)
+          : 9 * 60,
+      lastRunAt: lastRun is num
+          ? DateTime.fromMillisecondsSinceEpoch(lastRun.round())
+          : null,
+    );
+  }
+
   ScheduledScanConfig copyWith({
     bool? enabled,
     ScheduledScanFrequency? frequency,

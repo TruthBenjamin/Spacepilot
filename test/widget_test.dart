@@ -12,6 +12,6 @@ void main() {
     await tester.pump();
 
     expect(find.text('Your AI Storage Assistant'), findsOneWidget);
-    expect(find.text('Initializing AI Engine...'), findsOneWidget);
+    expect(find.text('Preparing SpacePilot...'), findsOneWidget);
   });
 }

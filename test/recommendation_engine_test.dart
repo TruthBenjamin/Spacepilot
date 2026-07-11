@@ -3,6 +3,7 @@ import 'package:spacepilot/features/duplicates/domain/models/models.dart';
 import 'package:spacepilot/features/recommendations/data/services/services.dart';
 import 'package:spacepilot/features/recommendations/domain/models/models.dart';
 import 'package:spacepilot/features/storage/domain/models/scanned_file.dart';
+import 'package:spacepilot/features/storage/domain/models/storage_stats.dart';
 
 void main() {
   const engine = RecommendationEngine();
@@ -28,9 +29,16 @@ void main() {
           filename: 'installer.apk',
           path: '/storage/Downloads/installer.apk',
           size: 20,
-          lastModified: now,
+          lastModified: now.subtract(const Duration(days: 40)),
         ),
       ],
+      storageStats: StorageStats(
+        totalBytes: 1000,
+        usedBytes: 900,
+        freeBytes: 100,
+        deviceHealthScore: 0,
+        lastUpdated: now,
+      ),
       duplicateGroups: [
         DuplicateGroup(
           sha256Hash: 'hash',
@@ -54,12 +62,14 @@ void main() {
     );
 
     expect(recommendations.map((item) => item.type), [
+      StorageRecommendationType.lowStorage,
       StorageRecommendationType.apkInstallers,
-      StorageRecommendationType.duplicateFiles,
+      StorageRecommendationType.duplicateMedia,
       StorageRecommendationType.unusedFiles,
       StorageRecommendationType.oldScreenshots,
     ]);
     expect(recommendations.map((item) => item.storageSavingsBytes), [
+      50,
       20,
       15,
       10,
@@ -123,5 +133,76 @@ void main() {
       recommendations.single.actionTarget,
       RecommendationActionTarget.duplicates,
     );
+    expect(
+      recommendations.single.action,
+      RecommendationAction.reviewDuplicates,
+    );
   });
+
+  test(
+    'builds large download, low storage, similar image, and folder rules',
+    () {
+      final now = DateTime(2026, 6, 28);
+      final recommendations = engine.buildRecommendations(
+        now: now,
+        storageStats: StorageStats(
+          totalBytes: 1000,
+          usedBytes: 900,
+          freeBytes: 100,
+          deviceHealthScore: 0,
+          lastUpdated: now,
+        ),
+        files: [
+          ScannedFile(
+            filename: 'huge.zip',
+            path: '/storage/emulated/0/Download/huge.zip',
+            size: 4 * 1024 * 1024 * 1024,
+            lastModified: now,
+          ),
+        ],
+        duplicateGroups: const [],
+        similarImageGroups: [
+          SimilarImageGroup(
+            files: [
+              SimilarImageFile(
+                name: 'a.jpg',
+                path: '/storage/DCIM/a.jpg',
+                sizeBytes: 100,
+                lastModified: now,
+                perceptualHash: '1',
+              ),
+              SimilarImageFile(
+                name: 'b.jpg',
+                path: '/storage/DCIM/b.jpg',
+                sizeBytes: 80,
+                lastModified: now,
+                perceptualHash: '2',
+              ),
+            ],
+            averageSimilarityScore: 93.75,
+            strongestSimilarityScore: 96.875,
+          ),
+        ],
+        emptyFolderPaths: const ['/storage/Downloads/empty'],
+      );
+
+      expect(
+        recommendations.map((item) => item.type),
+        containsAll([
+          StorageRecommendationType.largeDownloads,
+          StorageRecommendationType.lowStorage,
+          StorageRecommendationType.duplicateMedia,
+          StorageRecommendationType.emptyFolders,
+        ]),
+      );
+      expect(
+        recommendations
+            .firstWhere(
+              (item) => item.type == StorageRecommendationType.duplicateMedia,
+            )
+            .description,
+        contains('perceptual hashing'),
+      );
+    },
+  );
 }

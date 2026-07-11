@@ -55,8 +55,12 @@ void main() {
     expect(find.text('Duplicate Files'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
     expect(find.text('3'), findsOneWidget);
-    expect(find.text('4.0 MB'), findsOneWidget);
-    expect(find.text('2 selected'), findsOneWidget);
+    expect(find.text('4.0 MB'), findsWidgets);
+    expect(find.text('1 of 1 groups | 2 selected'), findsOneWidget);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+
     expect(find.text('KEEP'), findsOneWidget);
   });
 
@@ -66,10 +70,13 @@ void main() {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('photo-copy.jpg'));
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('photo-copy.jpg').first);
     await tester.pump();
 
-    expect(find.text('1 selected'), findsOneWidget);
+    expect(find.text('1 of 1 groups | 1 selected'), findsOneWidget);
   });
 
   testWidgets('requires confirmation before deleting duplicates', (
@@ -78,15 +85,20 @@ void main() {
     await tester.pumpWidget(buildPage());
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(find.text('Delete selected'), 250);
-    await tester.tap(find.text('Delete selected'));
+    final deleteButton = find.widgetWithText(FilledButton, 'Review & delete');
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
+    await tester.pumpAndSettle();
+
+    await tester.tap(deleteButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Delete selected duplicates?'), findsOneWidget);
-    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Keep reviewing'), findsOneWidget);
     expect(find.text('Delete files'), findsOneWidget);
+    expect(find.text('photo-copy.jpg'), findsWidgets);
+    expect(find.byTooltip('Preview file'), findsWidgets);
 
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.text('Keep reviewing'));
     await tester.pumpAndSettle();
 
     expect(find.text('Delete selected duplicates?'), findsNothing);
